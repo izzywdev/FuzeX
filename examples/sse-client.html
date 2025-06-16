@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Figma MCP SSE Client</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #0066ff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0052cc;
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f1f3f4;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .btn-secondary:hover {
+            background: #e8eaed;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .status-dot.connected {
+            background: #10b981;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 16px;
+            height: 300px;
+            overflow-y: auto;
+        }
+
+        .panel h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .log-entry {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            margin-bottom: 8px;
+            padding: 6px 8px;
+            border-radius: 3px;
+            background: white;
+            border-left: 3px solid #ddd;
+        }
+
+        .log-entry.info {
+            border-left-color: #0066ff;
+        }
+
+        .log-entry.success {
+            border-left-color: #10b981;
+        }
+
+        .log-entry.error {
+            border-left-color: #ef4444;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 10px;
+        }
+
+        .api-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .api-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .api-btn:hover {
+            background: #f0f0f0;
+            border-color: #0066ff;
+        }
+
+        .server-info {
+            background: #e8f4f8;
+            border: 1px solid #b8daff;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .client-id {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            color: #666;
+            background: #f0f0f0;
+            padding: 4px 8px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        .json-response {
+            background: #1a1a1a;
+            color: #f0f0f0;
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Figma MCP SSE Client</h1>
+        <p class="subtitle">Real-time connection to Figma MCP Server via Server-Sent Events</p>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="connectBtn">Connect</button>
+            <button class="btn btn-secondary" id="disconnectBtn" disabled>Disconnect</button>
+            <div class="status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </div>
+
+        <div class="server-info" id="serverInfo" style="display: none;">
+            <strong>Connected to:</strong> http://localhost:3015/mcp/sse<br>
+            <strong>Client ID:</strong> <span class="client-id" id="clientId">-</span><br>
+            <strong>Server:</strong> <span id="serverName">-</span> v<span id="serverVersion">-</span>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="container">
+            <h3>📡 SSE Events</h3>
+            <div class="panel" id="eventsPanel">
+                <div class="log-entry info">
+                    <div class="timestamp">Ready to connect...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <h3>🛠️ API Testing</h3>
+            <div class="api-controls">
+                <button class="api-btn" onclick="testAPI('get_document_info')">Get Document</button>
+                <button class="api-btn" onclick="testAPI('get_pages')">Get Pages</button>
+                <button class="api-btn" onclick="testAPI('create_rectangle')">Create Rectangle</button>
+                <button class="api-btn" onclick="testAPI('create_text')">Create Text</button>
+                <button class="api-btn" onclick="testAPI('create_frame')">Create Frame</button>
+                <button class="api-btn" onclick="testAPI('search_nodes')">Search Nodes</button>
+            </div>
+            <div class="panel" id="apiPanel">
+                <div class="log-entry info">
+                    <div class="timestamp">Click buttons above to test API calls</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h3>📋 Latest API Response</h3>
+        <div class="json-response" id="jsonResponse">No response yet...</div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let clientId = null;
+        let requestId = 1;
+
+        // DOM elements
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const serverInfo = document.getElementById('serverInfo');
+        const clientIdSpan = document.getElementById('clientId');
+        const serverName = document.getElementById('serverName');
+        const serverVersion = document.getElementById('serverVersion');
+        const eventsPanel = document.getElementById('eventsPanel');
+        const apiPanel = document.getElementById('apiPanel');
+        const jsonResponse = document.getElementById('jsonResponse');
+
+        // Event handlers
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+
+        function connect() {
+            if (eventSource) {
+                disconnect();
+            }
+
+            addEvent('info', 'Connecting to MCP server...');
+            
+            eventSource = new EventSource('http://localhost:3015/mcp/sse');
+            
+            eventSource.onopen = function(event) {
+                updateConnectionStatus(true);
+                addEvent('success', 'Connected to SSE endpoint');
+            };
+
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                addEvent('info', `Message: ${JSON.stringify(data)}`);
+            };
+
+            eventSource.addEventListener('connected', function(event) {
+                const data = JSON.parse(event.data);
+                clientId = data.clientId;
+                clientIdSpan.textContent = clientId;
+                serverInfo.style.display = 'block';
+                addEvent('success', `Client connected with ID: ${clientId}`);
+            });
+
+            eventSource.addEventListener('server-info', function(event) {
+                const data = JSON.parse(event.data);
+                serverName.textContent = data.name;
+                serverVersion.textContent = data.version;
+                addEvent('info', `Server info received: ${data.name} v${data.version}`);
+            });
+
+            eventSource.addEventListener('heartbeat', function(event) {
+                const data = JSON.parse(event.data);
+                addEvent('info', `Heartbeat: ${new Date(data.timestamp).toLocaleTimeString()}`);
+            });
+
+            eventSource.onerror = function(event) {
+                addEvent('error', 'Connection error or server unavailable');
+                updateConnectionStatus(false);
+            };
+        }
+
+        function disconnect() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            updateConnectionStatus(false);
+            serverInfo.style.display = 'none';
+            clientId = null;
+            addEvent('info', 'Disconnected from server');
+        }
+
+        function updateConnectionStatus(connected) {
+            statusDot.className = `status-dot ${connected ? 'connected' : ''}`;
+            statusText.textContent = connected ? 'Connected' : 'Disconnected';
+            connectBtn.disabled = connected;
+            disconnectBtn.disabled = !connected;
+        }
+
+        function addEvent(type, message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.innerHTML = `
+                <div class="timestamp">${timestamp}</div>
+                <div>${message}</div>
+            `;
+            eventsPanel.appendChild(entry);
+            eventsPanel.scrollTop = eventsPanel.scrollHeight;
+        }
+
+        function addAPILog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry info';
+            entry.innerHTML = `
+                <div class="timestamp">${timestamp}</div>
+                <div>${message}</div>
+            `;
+            apiPanel.appendChild(entry);
+            apiPanel.scrollTop = apiPanel.scrollHeight;
+        }
+
+        async function testAPI(toolName) {
+            if (!clientId) {
+                addAPILog('❌ Not connected to server');
+                return;
+            }
+
+            addAPILog(`🔄 Calling ${toolName}...`);
+
+            // Prepare different arguments for different tools
+            let args = {};
+            switch (toolName) {
+                case 'create_rectangle':
+                    args = {
+                        name: 'SSE Rectangle',
+                        x: Math.floor(Math.random() * 300),
+                        y: Math.floor(Math.random() * 300),
+                        width: 100,
+                        height: 60,
+                        fill: { 
+                            r: Math.random(), 
+                            g: Math.random(), 
+                            b: Math.random() 
+                        }
+                    };
+                    break;
+                case 'create_text':
+                    args = {
+                        name: 'SSE Text',
+                        text: 'Hello from SSE Client!',
+                        x: Math.floor(Math.random() * 300),
+                        y: Math.floor(Math.random() * 300),
+                        fontSize: 16
+                    };
+                    break;
+                case 'create_frame':
+                    args = {
+                        name: 'SSE Frame',
+                        x: Math.floor(Math.random() * 200),
+                        y: Math.floor(Math.random() * 200),
+                        width: 200,
+                        height: 150
+                    };
+                    break;
+                case 'search_nodes':
+                    args = {
+                        query: 'SSE'
+                    };
+                    break;
+            }
+
+            const request = {
+                jsonrpc: '2.0',
+                id: requestId++,
+                method: 'tools/call',
+                params: {
+                    name: toolName,
+                    arguments: args
+                }
+            };
+
+            try {
+                const response = await fetch('http://localhost:3015/mcp/request', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(request)
+                });
+
+                const result = await response.json();
+                
+                if (result.error) {
+                    addAPILog(`❌ ${toolName} failed: ${result.error.message}`);
+                    jsonResponse.textContent = JSON.stringify(result, null, 2);
+                } else {
+                    addAPILog(`✅ ${toolName} completed successfully`);
+                    jsonResponse.textContent = JSON.stringify(result, null, 2);
+                }
+            } catch (error) {
+                addAPILog(`❌ ${toolName} error: ${error.message}`);
+                jsonResponse.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Initialize
+        addEvent('info', 'SSE Client ready. Click Connect to start.');
+    </script>
+</body>
+</html> 

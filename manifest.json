@@ -1,0 +1,33 @@
+{
+  "name": "FuzeX Figma MCP Bridge",
+  "id": "fuzex-figma-mcp-bridge",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma", "figjam"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Plugin needs to communicate with localhost MCP bridge server to provide external API access"
+  },
+  "capabilities": [],
+  "permissions": [
+    "currentuser"
+  ],
+  "relaunchButtons": [
+    {
+      "command": "open-mcp-server",
+      "name": "Open MCP Server"
+    }
+  ],
+  "menu": [
+    {
+      "name": "Start MCP Server",
+      "command": "start-server"
+    },
+    {
+      "name": "Stop MCP Server", 
+      "command": "stop-server"
+    }
+  ]
+} 

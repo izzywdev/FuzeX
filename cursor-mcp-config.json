@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "figma": {
+      "command": "node",
+      "args": ["C:/Users/izzyw/source/FuzeX/cursor-mcp-client.js"],
+      "cwd": "C:/Users/izzyw/source/FuzeX",
+      "env": {
+        "NODE_ENV": "development"
+      }
+    }
+  }
+} 

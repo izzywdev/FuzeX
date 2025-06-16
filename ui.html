@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Figma MCP Server</title>
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #f9f9f9;
+            color: #333;
+        }
+
+        .container {
+            max-width: 100%;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .status-section {
+            margin-bottom: 24px;
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid #e1e5e9;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .status-dot.running {
+            background: #10b981;
+        }
+
+        .server-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #0066ff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0052cc;
+        }
+
+        .btn-secondary {
+            background: #f1f3f4;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .btn-secondary:hover {
+            background: #e8eaed;
+        }
+
+        .section {
+            margin-bottom: 20px;
+        }
+
+        .section h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .endpoint-info {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            word-break: break-all;
+        }
+
+        .clients-list {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .client-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .client-item:last-child {
+            border-bottom: none;
+        }
+
+        .log-container {
+            background: #1a1a1a;
+            color: #f0f0f0;
+            border-radius: 4px;
+            padding: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 11px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .api-section {
+            margin-top: 20px;
+        }
+
+        .tool-list {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .tool-item {
+            padding: 6px 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 11px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .tool-item:last-child {
+            border-bottom: none;
+        }
+
+        .url-copy {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .copy-btn {
+            padding: 4px 8px;
+            font-size: 10px;
+            background: #0066ff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .copy-btn:hover {
+            background: #0052cc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Figma MCP Server</h1>
+        
+        <div class="status-section">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Server Stopped</span>
+            </div>
+            <div class="server-controls">
+                <button class="btn btn-primary" id="startBtn">Start Server</button>
+                <button class="btn btn-secondary" id="stopBtn">Stop Server</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>📡 Server Endpoint</h3>
+            <div class="url-copy">
+                <div class="endpoint-info" id="serverUrl">Server not running</div>
+                <button class="copy-btn" id="copyBtn" style="display: none;">Copy</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>🌉 Bridge Server Status</h3>
+            <div class="clients-list" id="bridgeStatus">
+                <div class="client-item">
+                    <span>Connection: <span id="bridgeConnection">Checking...</span></span>
+                </div>
+                <div class="client-item">
+                    <span>External Clients: <span id="bridgeClients">0</span></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="api-section">
+            <h3>🛠️ Available Tools</h3>
+            <div class="tool-list" id="toolsList">
+                <div class="tool-item">get_document_info</div>
+                <div class="tool-item">get_pages</div>
+                <div class="tool-item">create_page</div>
+                <div class="tool-item">delete_page</div>
+                <div class="tool-item">get_nodes</div>
+                <div class="tool-item">create_frame</div>
+                <div class="tool-item">create_rectangle</div>
+                <div class="tool-item">create_ellipse</div>
+                <div class="tool-item">create_text</div>
+                <div class="tool-item">modify_node</div>
+                <div class="tool-item">delete_node</div>
+                <div class="tool-item">move_node</div>
+                <div class="tool-item">resize_node</div>
+                <div class="tool-item">set_node_properties</div>
+                <div class="tool-item">get_node_properties</div>
+                <div class="tool-item">duplicate_node</div>
+                <div class="tool-item">search_nodes</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>📝 Server Log</h3>
+            <div class="log-container" id="logContainer">
+                Ready to start MCP server...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // UI State Management
+        let isServerRunning = false;
+        let bridgeConnected = false;
+        let bridgeClients = 0;
+        let serverPort = 3015;
+        let server = null;
+
+        // DOM Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const serverUrl = document.getElementById('serverUrl');
+        const copyBtn = document.getElementById('copyBtn');
+        const bridgeConnection = document.getElementById('bridgeConnection');
+        const bridgeClientsElement = document.getElementById('bridgeClients');
+        const logContainer = document.getElementById('logContainer');
+
+        // Initialize
+        init();
+
+        function init() {
+            startBtn.addEventListener('click', startServer);
+            stopBtn.addEventListener('click', stopServer);
+            copyBtn.addEventListener('click', copyServerUrl);
+            
+            // Clear log and add initial message
+            logContainer.textContent = '';
+            log('🔌 Figma MCP Server Plugin loaded');
+            log('💡 Make sure bridge server is running: node bridge-server.js 3015');
+            
+            // Request initial server status
+            parent.postMessage({ pluginMessage: { type: 'get-server-status' } }, '*');
+            
+            updateUI();
+        }
+
+        function updateUI() {
+            statusDot.className = `status-dot ${isServerRunning ? 'running' : ''}`;
+            statusText.textContent = isServerRunning ? 'Server Running' : 'Server Stopped';
+            
+            if (isServerRunning) {
+                const url = `http://localhost:${serverPort}/mcp/sse`;
+                serverUrl.textContent = url;
+                copyBtn.style.display = 'inline-block';
+            } else {
+                serverUrl.textContent = 'Server not running';
+                copyBtn.style.display = 'none';
+            }
+            
+            updateBridgeStatus();
+        }
+
+        function updateBridgeStatus() {
+            if (bridgeConnected) {
+                bridgeConnection.textContent = '🟢 Connected';
+                bridgeConnection.style.color = '#10b981';
+            } else {
+                bridgeConnection.textContent = '🔴 Disconnected';
+                bridgeConnection.style.color = '#ef4444';
+            }
+            
+            bridgeClientsElement.textContent = bridgeClients;
+        }
+
+        function startServer() {
+            if (!isServerRunning) {
+                log('🚀 Starting MCP Server...');
+                parent.postMessage({ pluginMessage: { type: 'start-server' } }, '*');
+            }
+        }
+
+        function stopServer() {
+            if (isServerRunning) {
+                log('🛑 Stopping MCP Server...');
+                parent.postMessage({ pluginMessage: { type: 'stop-server' } }, '*');
+            }
+        }
+
+        async function startHTTPServer() {
+            try {
+                // Since we can't create a real HTTP server in Figma plugin context,
+                // we'll simulate SSE server functionality through the plugin bridge
+                log(`📡 SSE Server listening on port ${serverPort}`);
+                log('🔗 MCP endpoints available:');
+                log('   GET  /mcp/sse - Server-Sent Events endpoint');
+                log('   POST /mcp/request - Direct MCP requests');
+                log('✅ Server ready for connections');
+                
+                // Simulate server readiness
+                simulateServerEndpoints();
+            } catch (error) {
+                log(`❌ Failed to start server: ${error.message}`);
+                isServerRunning = false;
+                updateUI();
+            }
+        }
+
+        function simulateServerEndpoints() {
+            // Since Figma plugins can't create real HTTP servers,
+            // we'll create a message-based system that can be accessed externally
+            
+            // This would typically be handled by a companion Node.js server
+            // or through Figma's plugin API extensions
+            log('💡 Note: Real HTTP server requires external bridge');
+            log('📖 Use the provided Node.js bridge server for full functionality');
+        }
+
+        function copyServerUrl() {
+            const url = `http://localhost:${serverPort}/mcp/sse`;
+            navigator.clipboard.writeText(url).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logContainer.textContent += `[${timestamp}] ${message}\n`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // Handle messages from plugin
+        window.addEventListener('message', (event) => {
+            const msg = event.data.pluginMessage;
+            
+            switch (msg.type) {
+                case 'server-status':
+                    isServerRunning = msg.running;
+                    updateUI();
+                    if (msg.running) {
+                        log('✅ Server status: Running');
+                    } else {
+                        log('🛑 Server status: Stopped');
+                    }
+                    break;
+                    
+                case 'log':
+                    log(msg.message);
+                    break;
+                    
+                case 'bridge-status':
+                    bridgeConnected = msg.connected;
+                    bridgeClients = msg.clients;
+                    updateBridgeStatus();
+                    break;
+                    
+                case 'mcp-request':
+                    log(`📨 MCP Request: ${msg.method}`);
+                    break;
+                    
+                case 'mcp-response':
+                    log(`📤 MCP Response: ${msg.status}`);
+                    break;
+                    
+                case 'pong':
+                    // Server is alive, no need to log
+                    break;
+                    
+                case 'error':
+                    log(`❌ Error: ${msg.message}`);
+                    break;
+            }
+        });
+
+        // Periodic status check
+        setInterval(() => {
+            if (isServerRunning) {
+                parent.postMessage({ pluginMessage: { type: 'ping' } }, '*');
+            }
+        }, 5000);
+    </script>
+</body>
+</html> 

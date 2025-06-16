@@ -1,0 +1,40 @@
+{
+  "name": "figma-mcp-server-plugin",
+  "version": "1.0.0",
+  "description": "A Figma plugin that exposes an SSE MCP server for manipulating Figma files via API",
+  "main": "bridge-server.js",
+  "bin": {
+    "figma-mcp-bridge": "./bridge-server.js"
+  },
+  "scripts": {
+    "start": "node bridge-server.js",
+    "dev": "node bridge-server.js 3001",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "figma",
+    "mcp",
+    "server-sent-events",
+    "sse",
+    "api",
+    "plugin",
+    "design",
+    "automation"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/figma-mcp-server-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/figma-mcp-server-plugin/issues"
+  },
+  "homepage": "https://github.com/yourusername/figma-mcp-server-plugin#readme"
+} 

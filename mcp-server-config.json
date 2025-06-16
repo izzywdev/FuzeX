@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "figma-mcp-server": {
+      "command": "node",
+      "args": ["bridge-server.js", "3015"],
+      "cwd": "C:/Users/izzyw/source/FuzeX",
+      "env": {
+        "NODE_ENV": "development"
+      }
+    }
+  }
+} 
