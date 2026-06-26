@@ -1,0 +1,27 @@
+{
+  "repo": "izzywdev/FuzeX",
+  "class": "oss-public",
+  "tier": "product",
+  "expert": "fuzex-expert",
+  "baselineRef": "main",
+  "agents": [
+    "fuzex-expert",
+    "contract-designer",
+    "backend-engineer",
+    "database-engineer",
+    "frontend-engineer",
+    "test-engineer",
+    "frontend-test-engineer",
+    "devops-engineer",
+    "docs-maintainer",
+    "agile-manager",
+    "security",
+    "fuzefront-expert",
+    "fuzeinfra-expert"
+  ],
+  "hardening": {
+    "ruleset": true,
+    "requireSignatures": true,
+    "deployOnPush": false
+  }
+}
