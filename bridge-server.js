@@ -3,21 +3,172 @@
 /**
  * Figma MCP Bridge Server
  * This Node.js server acts as a bridge between external MCP clients and the Figma plugin
- * It provides HTTP/SSE endpoints for MCP communication
+ * It provides HTTP/SSE endpoints for MCP communication.
+ *
+ * SECURITY CLASSIFICATION: localhost-only developer tool.
+ * This bridge is NOT a hosted service. It binds to 127.0.0.1 only and uses a
+ * per-session bearer token (generated at startup, displayed in the console).
+ * No FuzeFront OIDC/Authentik integration is required for this classification;
+ * the loopback-bind + token IS the authN boundary (see issue #7 architecture note).
+ *
+ * Security controls (all CRITICAL/HIGH from issue #7):
+ *   [C1] Binds to 127.0.0.1 only — no 0.0.0.0 exposure
+ *   [C2] Per-session bearer token required on every route except /health
+ *   [C3] CORS allowlist (localhost origins only) — replaces wildcard *
+ *   [C4] manifest allowedDomains restricted to localhost variants
+ *   [H1] GET /plugin/get-requests scoped to plugin session via same token
+ *   [H2] requestId ownership validated on send-response
+ *   [H3] POST /plugin/connect requires bearer token (prevents spoofing)
+ *   [M1] JSON-RPC envelope schema-validated before use
+ *   [M2] Request body capped at MAX_BODY_BYTES (64 KB)
+ *   [M3] request.params guarded before dereferencing .name
  */
 
+'use strict';
+
 const http = require('http');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const BIND_HOST = '127.0.0.1';  // [C1] loopback only — never 0.0.0.0
+const MAX_BODY_BYTES = 64 * 1024; // [M2] 64 KB body cap
+
+// Allowed CORS origins: localhost variants only. [C3]
+const ALLOWED_CORS_ORIGINS = new Set([
+    'http://localhost',
+    'http://127.0.0.1',
+    // With ports — the plugin iframe uses these during dev
+    /^http:\/\/localhost:\d+$/,
+    /^http:\/\/127\.0\.0\.1:\d+$/,
+]);
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Generate a cryptographically random token (32 bytes, hex-encoded = 64 chars).
+ */
+function generateSessionToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * Constant-time comparison to prevent timing attacks on the token check.
+ */
+function safeCompare(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    if (a.length !== b.length) {
+        // Still run timingSafeEqual on equal-length dummy to avoid length oracle
+        crypto.timingSafeEqual(Buffer.alloc(32), Buffer.alloc(32));
+        return false;
+    }
+    return crypto.timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+}
+
+/**
+ * Return the Origin of the request (or empty string if absent).
+ */
+function getOrigin(req) {
+    return req.headers['origin'] || '';
+}
+
+/**
+ * Determine whether the given origin is in the allowlist.
+ */
+function isAllowedOrigin(origin) {
+    if (!origin) return false; // no-origin requests (non-browser clients) pass CORS differently
+    for (const entry of ALLOWED_CORS_ORIGINS) {
+        if (typeof entry === 'string' && entry === origin) return true;
+        if (entry instanceof RegExp && entry.test(origin)) return true;
+    }
+    return false;
+}
+
+/**
+ * Validate a JSON-RPC 2.0 MCP envelope minimally.
+ * Returns null if valid, or an error string if invalid.
+ * [M1]
+ */
+function validateMcpEnvelope(obj) {
+    if (!obj || typeof obj !== 'object') return 'body must be a JSON object';
+    if (obj.jsonrpc !== '2.0') return 'jsonrpc must be "2.0"';
+    if (typeof obj.method !== 'string' || obj.method.length === 0) return 'method must be a non-empty string';
+    if (obj.id !== undefined && typeof obj.id !== 'string' && typeof obj.id !== 'number' && obj.id !== null) {
+        return 'id must be string, number, or null if present';
+    }
+    if (obj.params !== undefined && (typeof obj.params !== 'object' || Array.isArray(obj.params))) {
+        return 'params must be an object if present';
+    }
+    return null;
+}
+
+/**
+ * Read request body with a byte cap. Returns a Buffer.
+ * Rejects with BodyTooLargeError if body exceeds MAX_BODY_BYTES.
+ * We drain (not destroy) so the TCP connection stays open and the caller
+ * can still write the 413 response before the socket closes. [M2]
+ */
+function readBody(req) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let total = 0;
+        let tooLarge = false;
+
+        req.on('data', chunk => {
+            total += chunk.length;
+            if (total > MAX_BODY_BYTES && !tooLarge) {
+                tooLarge = true;
+                // Drain remaining data so the socket is not stuck; do not destroy.
+                req.resume();
+                reject(new BodyTooLargeError());
+                return;
+            }
+            if (!tooLarge) {
+                chunks.push(chunk);
+            }
+        });
+
+        req.on('end', () => {
+            if (!tooLarge) resolve(Buffer.concat(chunks));
+        });
+        req.on('error', err => {
+            if (!tooLarge) reject(err);
+        });
+    });
+}
+
+class BodyTooLargeError extends Error {
+    constructor() {
+        super(`Request body exceeds ${MAX_BODY_BYTES} byte limit`);
+        this.code = 'BODY_TOO_LARGE';
+    }
+}
+
+// ─── Server ───────────────────────────────────────────────────────────────────
+
 class FigmaMcpBridgeServer {
-    constructor(port = 3015) {
+    constructor(port = 3015, sessionToken = null) {
         this.port = port;
         this.server = null;
         this.sseClients = new Map(); // clientId -> response object
-        this.mcpRequests = new Map(); // requestId -> pending request
+        this.mcpRequests = new Map(); // requestId -> { request, res, timestamp }
+        this.pendingPluginRequests = new Map(); // requestId -> { id, mcpRequest, timestamp }
         this.figmaConnected = false;
-        
-        console.log(`🚀 Figma MCP Bridge Server initializing on port ${port}`);
+
+        // [C2] Per-session bearer token. Caller can inject one for tests.
+        this.sessionToken = sessionToken || generateSessionToken();
+
+        console.log('Figma MCP Bridge Server initializing on port ' + port);
+        console.log('');
+        console.log('  SECURITY — localhost-only dev bridge');
+        console.log('  Session token (share only with the Figma plugin):');
+        console.log('');
+        console.log('    ' + this.sessionToken);
+        console.log('');
+        console.log('  Set in Figma plugin UI or pass via Authorization: Bearer <token>');
+        console.log('  All requests except GET /health require this token.');
+        console.log('');
     }
 
     start() {
@@ -25,40 +176,97 @@ class FigmaMcpBridgeServer {
             this.handleRequest(req, res);
         });
 
-        this.server.listen(this.port, () => {
-            console.log(`📡 MCP Bridge Server running on http://localhost:${this.port}`);
-            console.log(`🔗 SSE endpoint: http://localhost:${this.port}/mcp/sse`);
-            console.log(`📨 Request endpoint: http://localhost:${this.port}/mcp/request`);
-            console.log('🔌 Waiting for Figma plugin connection...');
+        // [C1] Bind to loopback only.
+        this.server.listen(this.port, BIND_HOST, () => {
+            console.log('MCP Bridge Server running on http://' + BIND_HOST + ':' + this.port);
+            console.log('SSE endpoint:      http://' + BIND_HOST + ':' + this.port + '/mcp/sse');
+            console.log('Request endpoint:  http://' + BIND_HOST + ':' + this.port + '/mcp/request');
+            console.log('Waiting for Figma plugin connection...');
         });
 
         this.server.on('error', (error) => {
-            console.error('❌ Server error:', error);
+            console.error('Server error:', error);
         });
     }
 
     stop() {
         if (this.server) {
             this.server.close(() => {
-                console.log('🛑 Bridge server stopped');
+                console.log('Bridge server stopped');
             });
         }
     }
 
-    handleRequest(req, res) {
-        // Enable CORS
-        res.setHeader('Access-Control-Allow-Origin', '*');
+    // ─── Auth middleware ────────────────────────────────────────────────────
+
+    /**
+     * Extract the bearer token from the Authorization header.
+     */
+    _extractBearer(req) {
+        const header = req.headers['authorization'] || '';
+        if (!header.startsWith('Bearer ')) return null;
+        return header.slice('Bearer '.length).trim();
+    }
+
+    /**
+     * Validate the bearer token. Returns true if valid. [C2]
+     */
+    _isAuthorized(req) {
+        const provided = this._extractBearer(req);
+        if (!provided) return false;
+        return safeCompare(provided, this.sessionToken);
+    }
+
+    /**
+     * Send 401 Unauthorized.
+     */
+    _unauthorized(res) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized — Bearer token required' }));
+    }
+
+    // ─── CORS ──────────────────────────────────────────────────────────────
+
+    /**
+     * Set CORS headers. Only reflects the origin if it is in the allowlist.
+     * Non-browser callers (curl, MCP clients) omit Origin; they pass without CORS restriction. [C3]
+     */
+    _setCorsHeaders(req, res) {
+        const origin = getOrigin(req);
+        if (origin && isAllowedOrigin(origin)) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Vary', 'Origin');
+        }
+        // Do NOT set Access-Control-Allow-Origin for disallowed origins — browser will block them.
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
+
+    // ─── Request dispatcher ────────────────────────────────────────────────
+
+    handleRequest(req, res) {
+        this._setCorsHeaders(req, res);
 
         if (req.method === 'OPTIONS') {
-            res.writeHead(200);
+            res.writeHead(204);
             res.end();
             return;
         }
 
-        const url = new URL(req.url, `http://localhost:${this.port}`);
-        
+        const url = new URL(req.url, 'http://' + BIND_HOST + ':' + this.port);
+
+        // /health is exempt from auth — used by health-checkers / CI.
+        if (url.pathname === '/health') {
+            this.handleHealth(req, res);
+            return;
+        }
+
+        // All other routes require the bearer token. [C2]
+        if (!this._isAuthorized(req)) {
+            this._unauthorized(res);
+            return;
+        }
+
         switch (url.pathname) {
             case '/mcp/sse':
                 this.handleSSE(req, res);
@@ -78,47 +286,38 @@ class FigmaMcpBridgeServer {
             case '/status':
                 this.handleStatus(req, res);
                 break;
-            case '/health':
-                this.handleHealth(req, res);
-                break;
             default:
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Not found' }));
         }
     }
 
-    handleSSE(req, res) {
-        // Server-Sent Events endpoint for MCP clients
-        const clientId = uuidv4();
-        
-        console.log(`🔌 SSE client connecting: ${clientId}`);
+    // ─── Handlers ──────────────────────────────────────────────────────────
 
-        // Set SSE headers
+    handleSSE(req, res) {
+        const clientId = uuidv4();
+
+        console.log('SSE client connecting: ' + clientId);
+
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*'
         });
 
-        // Send initial connection event
         this.sendSSEMessage(res, 'connected', { clientId, timestamp: Date.now() });
-
-        // Store client connection
         this.sseClients.set(clientId, res);
 
-        // Handle client disconnect
         req.on('close', () => {
-            console.log(`🔌 SSE client disconnected: ${clientId}`);
+            console.log('SSE client disconnected: ' + clientId);
             this.sseClients.delete(clientId);
         });
 
         req.on('error', (error) => {
-            console.error(`❌ SSE client error: ${clientId}`, error);
+            console.error('SSE client error: ' + clientId, error);
             this.sseClients.delete(clientId);
         });
 
-        // Send periodic heartbeat
         const heartbeat = setInterval(() => {
             if (this.sseClients.has(clientId)) {
                 this.sendSSEMessage(res, 'heartbeat', { timestamp: Date.now() });
@@ -127,7 +326,6 @@ class FigmaMcpBridgeServer {
             }
         }, 30000);
 
-        // Send MCP server info
         setTimeout(() => {
             this.sendSSEMessage(res, 'server-info', {
                 name: 'figma-mcp-server',
@@ -148,57 +346,67 @@ class FigmaMcpBridgeServer {
             return;
         }
 
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
+        readBody(req)
+            .then(buf => {
+                let mcpRequest;
+                try {
+                    mcpRequest = JSON.parse(buf.toString('utf8'));
+                } catch (_) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: null,
+                        error: { code: -32700, message: 'Parse error' }
+                    }));
+                    return;
+                }
 
-        req.on('end', () => {
-            try {
-                const mcpRequest = JSON.parse(body);
+                // [M1] Validate JSON-RPC envelope before touching any field.
+                const envelopeErr = validateMcpEnvelope(mcpRequest);
+                if (envelopeErr) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: null,
+                        error: { code: -32600, message: 'Invalid Request: ' + envelopeErr }
+                    }));
+                    return;
+                }
+
                 this.processMcpRequest(mcpRequest, res);
-            } catch (error) {
-                console.error('❌ Invalid JSON in MCP request:', error);
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: null,
-                    error: {
-                        code: -32700,
-                        message: 'Parse error'
-                    }
-                }));
-            }
-        });
+            })
+            .catch(err => {
+                if (err && err.code === 'BODY_TOO_LARGE') {
+                    res.writeHead(413, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                } else {
+                    console.error('handleMcpRequest read error:', err);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Internal server error' }));
+                }
+            });
     }
 
-    async processMcpRequest(request, res) {
-        console.log(`📨 MCP Request: ${request.method} (ID: ${request.id})`);
+    processMcpRequest(request, res) {
+        const method = request.method;
+        console.log('MCP Request: ' + method + ' (ID: ' + request.id + ')');
 
         try {
-            // Handle MCP protocol methods
-            if (request.method === 'initialize') {
-                const response = {
+            if (method === 'initialize') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
                     jsonrpc: '2.0',
                     id: request.id,
                     result: {
                         protocolVersion: '2024-11-05',
-                        capabilities: {
-                            tools: {}
-                        },
-                        serverInfo: {
-                            name: 'figma-mcp-bridge-server',
-                            version: '1.0.0'
-                        }
+                        capabilities: { tools: {} },
+                        serverInfo: { name: 'figma-mcp-bridge-server', version: '1.0.0' }
                     }
-                };
-
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(response));
+                }));
                 return;
             }
 
-            if (request.method === 'tools/list') {
+            if (method === 'tools/list') {
                 const tools = [
                     'get_document_info', 'get_pages', 'create_page', 'delete_page',
                     'get_nodes', 'create_frame', 'create_rectangle', 'create_ellipse',
@@ -207,68 +415,57 @@ class FigmaMcpBridgeServer {
                     'duplicate_node', 'search_nodes'
                 ];
 
-                const response = {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
                     jsonrpc: '2.0',
                     id: request.id,
                     result: {
                         tools: tools.map(name => ({
                             name,
-                            description: `Figma API operation: ${name}`,
-                            inputSchema: {
-                                type: 'object',
-                                properties: {},
-                                additionalProperties: true
-                            }
+                            description: 'Figma API operation: ' + name,
+                            inputSchema: { type: 'object', properties: {}, additionalProperties: true }
                         }))
                     }
-                };
-
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(response));
+                }));
                 return;
             }
 
-            // For tool calls and other operations, we need to communicate with Figma plugin
+            // Forward to plugin via pending queue.
             if (!this.figmaConnected) {
                 throw new Error('Figma plugin not connected');
             }
 
-            // Store pending request and forward to Figma plugin
+            // [M3] Guard params.name before logging/using it.
+            const toolName = (request.params && typeof request.params.name === 'string')
+                ? request.params.name
+                : '(unknown)';
+
             const requestId = uuidv4();
             this.mcpRequests.set(requestId, { request, res, timestamp: Date.now() });
-
-            // Store the request for the plugin to pick up
-            this.pendingPluginRequests = this.pendingPluginRequests || new Map();
             this.pendingPluginRequests.set(requestId, {
                 id: requestId,
                 mcpRequest: request,
                 timestamp: Date.now()
             });
 
-            console.log(`📨 Stored request ${requestId} for plugin: ${request.params.name}`);
+            console.log('Stored request ' + requestId + ' for plugin tool: ' + toolName);
 
         } catch (error) {
-            console.error('❌ MCP request error:', error);
-            const errorResponse = {
+            console.error('MCP request error:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
                 jsonrpc: '2.0',
                 id: request.id,
-                error: {
-                    code: -32603,
-                    message: error.message
-                }
-            };
-
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(errorResponse));
+                error: { code: -32603, message: error.message }
+            }));
         }
     }
-
-    // Simulation methods removed - now using real Figma plugin communication
 
     handleStatus(req, res) {
         const status = {
             server: 'running',
             port: this.port,
+            host: BIND_HOST,
             figmaConnected: this.figmaConnected,
             connectedClients: this.sseClients.size,
             pendingRequests: this.mcpRequests.size,
@@ -286,30 +483,39 @@ class FigmaMcpBridgeServer {
             return;
         }
 
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
+        // [H3] Token already validated by the dispatcher — no additional secret needed here.
+        // Log the caller for audit.
+        readBody(req)
+            .then(buf => {
+                let data = {};
+                try {
+                    data = buf.length ? JSON.parse(buf.toString('utf8')) : {};
+                } catch (_) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+                    return;
+                }
 
-        req.on('end', () => {
-            try {
-                const data = JSON.parse(body);
                 this.figmaConnected = true;
-                this.pendingPluginRequests = this.pendingPluginRequests || new Map();
-                console.log('🔌 Plugin connected successfully!', data);
-                
+                console.log('Plugin connected successfully!', { pluginInfo: data.pluginInfo || '(none)' });
+
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ 
-                    status: 'connected', 
+                res.end(JSON.stringify({
+                    status: 'connected',
                     message: 'Plugin connected successfully',
-                    timestamp: Date.now() 
+                    timestamp: Date.now()
                 }));
-            } catch (error) {
-                console.error('❌ Plugin connection error:', error);
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Invalid connection data' }));
-            }
-        });
+            })
+            .catch(err => {
+                if (err && err.code === 'BODY_TOO_LARGE') {
+                    res.writeHead(413, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                } else {
+                    console.error('Plugin connect read error:', err);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid connection data' }));
+                }
+            });
     }
 
     handlePluginGetRequests(req, res) {
@@ -319,11 +525,11 @@ class FigmaMcpBridgeServer {
             return;
         }
 
-        this.pendingPluginRequests = this.pendingPluginRequests || new Map();
-        
-        // Return all pending requests
+        // [H1] The caller is already authenticated (same session token) — return all pending requests.
+        // In a multi-session scenario each session would have its own pending queue; here there is
+        // one plugin session per server instance so the token == the session gate.
         const requests = Array.from(this.pendingPluginRequests.values());
-        
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ requests }));
     }
@@ -335,68 +541,99 @@ class FigmaMcpBridgeServer {
             return;
         }
 
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
+        readBody(req)
+            .then(buf => {
+                let body;
+                try {
+                    body = JSON.parse(buf.toString('utf8'));
+                } catch (_) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid JSON' }));
+                    return;
+                }
 
-        req.on('end', () => {
-            try {
-                const { requestId, response } = JSON.parse(body);
-                
-                // Find the original MCP request
-                const pendingRequest = this.mcpRequests.get(requestId);
-                if (!pendingRequest) {
+                // [M1] Validate expected fields.
+                const { requestId, response } = body;
+                if (typeof requestId !== 'string' || requestId.length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'requestId must be a non-empty string' }));
+                    return;
+                }
+                if (response === undefined) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'response field is required' }));
+                    return;
+                }
+
+                // [H2] Validate requestId ownership — must exist in pendingPluginRequests
+                // (only the plugin's authenticated session can call this endpoint, and only
+                //  for requests it received from get-requests).
+                if (!this.pendingPluginRequests.has(requestId)) {
+                    // Do NOT reveal whether the id ever existed — 404 regardless.
                     res.writeHead(404, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Request not found' }));
                     return;
                 }
 
-                // Send response back to MCP client
+                const pendingRequest = this.mcpRequests.get(requestId);
+                if (!pendingRequest) {
+                    // mcpRequests and pendingPluginRequests should be in sync;
+                    // this path means the MCP client already disconnected.
+                    this.pendingPluginRequests.delete(requestId);
+                    res.writeHead(410, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'MCP client for this request is no longer connected' }));
+                    return;
+                }
+
+                // [M3] Guard params.name before logging.
+                const toolName = (pendingRequest.request.params && typeof pendingRequest.request.params.name === 'string')
+                    ? pendingRequest.request.params.name
+                    : '(unknown)';
+
                 const mcpResponse = {
                     jsonrpc: '2.0',
                     id: pendingRequest.request.id,
                     result: {
-                        content: [
-                            {
-                                type: 'text',
-                                text: JSON.stringify(response, null, 2)
-                            }
-                        ]
+                        content: [{ type: 'text', text: JSON.stringify(response, null, 2) }]
                     }
                 };
 
                 pendingRequest.res.writeHead(200, { 'Content-Type': 'application/json' });
                 pendingRequest.res.end(JSON.stringify(mcpResponse));
 
-                // Clean up
+                // Clean up both maps atomically.
                 this.mcpRequests.delete(requestId);
                 this.pendingPluginRequests.delete(requestId);
 
-                console.log(`✅ Real response sent for ${pendingRequest.request.params.name}`);
+                console.log('Real response sent for request ' + requestId + ' (' + toolName + ')');
 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ status: 'success' }));
-                
-            } catch (error) {
-                console.error('❌ Plugin response error:', error);
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Invalid response data' }));
-            }
-        });
+            })
+            .catch(err => {
+                if (err && err.code === 'BODY_TOO_LARGE') {
+                    res.writeHead(413, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                } else {
+                    console.error('Plugin response error:', err);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid response data' }));
+                }
+            });
     }
 
     handleHealth(req, res) {
+        // Health is intentionally auth-exempt so CI/health-checkers work without a token.
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'healthy', timestamp: Date.now() }));
     }
 
     sendSSEMessage(res, event, data) {
         try {
-            res.write(`event: ${event}\n`);
-            res.write(`data: ${JSON.stringify(data)}\n\n`);
+            res.write('event: ' + event + '\n');
+            res.write('data: ' + JSON.stringify(data) + '\n\n');
         } catch (error) {
-            console.error('❌ Error sending SSE message:', error);
+            console.error('Error sending SSE message:', error);
         }
     }
 
@@ -407,20 +644,20 @@ class FigmaMcpBridgeServer {
     }
 }
 
-// CLI interface
+// ─── CLI entry point ──────────────────────────────────────────────────────────
+
 if (require.main === module) {
     const port = parseInt(process.argv[2]) || 3001;
     const server = new FigmaMcpBridgeServer(port);
 
-    // Handle graceful shutdown
     process.on('SIGINT', () => {
-        console.log('\n🛑 Shutting down bridge server...');
+        console.log('\nShutting down bridge server...');
         server.stop();
         process.exit(0);
     });
 
     process.on('SIGTERM', () => {
-        console.log('\n🛑 Shutting down bridge server...');
+        console.log('\nShutting down bridge server...');
         server.stop();
         process.exit(0);
     });
@@ -428,4 +665,4 @@ if (require.main === module) {
     server.start();
 }
 
-module.exports = FigmaMcpBridgeServer; 
+module.exports = { FigmaMcpBridgeServer, generateSessionToken, safeCompare, validateMcpEnvelope, isAllowedOrigin };
