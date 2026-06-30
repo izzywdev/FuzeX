@@ -7,8 +7,12 @@
   "editorType": ["figma", "figjam"],
   "documentAccess": "dynamic-page",
   "networkAccess": {
-    "allowedDomains": ["*"],
-    "reasoning": "Plugin needs to communicate with localhost MCP bridge server to provide external API access"
+    "allowedDomains": [
+      "localhost",
+      "http://localhost",
+      "http://127.0.0.1"
+    ],
+    "reasoning": "Plugin communicates with the localhost-only MCP bridge server (127.0.0.1 loopback). Wildcard '*' removed — CRITICAL fix for issue #7 [C4]."
   },
   "capabilities": [],
   "permissions": [
@@ -26,8 +30,8 @@
       "command": "start-server"
     },
     {
-      "name": "Stop MCP Server", 
+      "name": "Stop MCP Server",
       "command": "stop-server"
     }
   ]
-} 
+}
