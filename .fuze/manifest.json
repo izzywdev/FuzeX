@@ -3,7 +3,7 @@
   "class": "oss-public",
   "tier": "product",
   "expert": "fuzex-expert",
-  "baselineRef": "main",
+  "baselineRef": "v1",
   "agents": [
     "fuzex-expert",
     "contract-designer",
