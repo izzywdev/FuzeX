@@ -23,5 +23,14 @@
     "ruleset": true,
     "requireSignatures": true,
     "deployOnPush": false
-  }
+  },
+  "providesTo": [],
+  "dependsOn": [
+    "FuzeAgent",
+    "FuzeBI",
+    "FuzeDeploy",
+    "FuzeFront",
+    "FuzeKeys",
+    "FuzePlan"
+  ]
 }
