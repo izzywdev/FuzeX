@@ -18,7 +18,8 @@
     "security",
     "fuzefront-expert",
     "fuzeinfra-expert",
-    "a2a-maintainer"
+    "a2a-maintainer",
+    "mcp-maintainer"
   ],
   "hardening": {
     "ruleset": true,
@@ -33,5 +34,21 @@
     "FuzeFront",
     "FuzeKeys",
     "FuzePlan"
-  ]
+  ],
+  "mcp": {
+    "enabled": true,
+    "servers": [
+      {
+        "name": "fuzex-figma-bridge",
+        "transport": "stdio",
+        "entry": "bridge-server.js"
+      }
+    ],
+    "entryServer": "fuzex-figma-bridge",
+    "note": "REAL, not a scaffold \u2014 this repo IS an MCP bridge: a Figma plugin (manifest.json, editorType figma/figjam) talking to a localhost MCP server over bridge-server.js. Outstanding for mcp-maintainer: (1) no tools.json declaring the surface or `mutates` per tool \u2014 the plugin protocol in code.js handles start-server/stop-server/mcp-request/client-connect/client-disconnect/get-server-status/ping, which is transport, not a tool manifest; (2) mcp-server-config.json hardcodes an absolute Windows cwd (C:/Users/izzyw/source/FuzeX) so the config is not portable to any other machine or to CI."
+  },
+  "portal": {
+    "registers": false,
+    "reason": "FuzeX is a Figma/FigJam plugin, not a web app. Its UI runs in Figma's plugin sandbox (manifest.json: editorType [figma, figjam], ui.html) and networkAccess is deliberately restricted to localhost \u2014 there is no served origin to iframe and no remoteEntry to federate. Registering it in the FuzeFront portal would add a side-menu entry that cannot mount anything."
+  }
 }
