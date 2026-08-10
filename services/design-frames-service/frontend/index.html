@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design Frames — FuzeX</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Design Frames</h1>
+    <p class="tagline">Navigable frames, contract, and per-flow approval for the product-design phase — served by FuzeX's design-frames-service.</p>
+    <label class="token-field">
+      API token (writes only)
+      <input id="token" type="password" placeholder="paste a DESIGN_FRAMES_API_TOKENS value" autocomplete="off">
+    </label>
+  </header>
+
+  <main>
+    <section id="feature-list-section">
+      <h2>Features</h2>
+      <ul id="feature-list" class="feature-list"><li class="muted">loading…</li></ul>
+    </section>
+
+    <section id="feature-detail-section" hidden>
+      <button id="back-btn" class="link-btn">&larr; back to features</button>
+      <h2 id="feature-name"></h2>
+      <p id="feature-description" class="muted"></p>
+      <div class="stamp-row">
+        <code id="feature-stamp"></code>
+        <span id="stamp-state"></span>
+      </div>
+
+      <div class="detail-grid">
+        <nav id="frame-nav" class="frame-nav"></nav>
+        <div class="frame-viewer">
+          <iframe id="frame-frame" title="frame preview"></iframe>
+        </div>
+      </div>
+
+      <h3>Flows</h3>
+      <ul id="flow-list" class="flow-list"></ul>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

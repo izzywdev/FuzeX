@@ -1,0 +1,333 @@
+openapi: 3.0.3
+info:
+  title: design-frames-service
+  version: 0.1.0
+  description: >
+    Product-design-phase service: navigable HTML frames, per-flow approval,
+    and the API/component/flag contract seam. Extracted from FuzeFront's
+    design/frames/** pipeline — see README.md and docs/EXTRACTION.md.
+servers:
+  - url: http://localhost:4400
+security:
+  - bearerAuth: []
+  - {}
+paths:
+  /health:
+    get:
+      summary: Liveness check
+      security: []
+      responses:
+        '200':
+          description: healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: healthy }
+                  timestamp: { type: integer }
+
+  /api/v1/features:
+    get:
+      summary: List features
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features:
+                    type: array
+                    items: { $ref: '#/components/schemas/FeatureSummary' }
+    post:
+      summary: Create a feature shell
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  manifest: { $ref: '#/components/schemas/Manifest' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug]
+              properties:
+                slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
+                name: { type: string }
+                description: { type: string }
+                designSystem: { type: string }
+                entry: { type: string }
+                sourceRepo: { type: string, nullable: true, description: "Which consuming product these frames are for, e.g. 'FuzeFront'." }
+
+  /api/v1/features/{slug}:
+    get:
+      summary: Get a feature's manifest and all frame contents
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  manifest: { $ref: '#/components/schemas/Manifest' }
+                  frames:
+                    type: object
+                    additionalProperties: { type: string }
+                    description: frame file name -> raw HTML content
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/manifest:
+    put:
+      summary: Replace the manifest (schema-validated)
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Manifest' }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/stamp:
+    get:
+      summary: Compute the current content stamp and compare to the persisted one (no write)
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  stamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  manifestStamp: { type: string, nullable: true }
+                  current: { type: boolean }
+    post:
+      summary: Compute AND persist the stamp onto the manifest
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/frames/{file}:
+    parameters:
+      - { $ref: '#/components/parameters/Slug' }
+      - name: file
+        in: path
+        required: true
+        schema: { type: string, pattern: '\.html$' }
+    get:
+      summary: Get one frame's raw HTML
+      security: []
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Create/replace one frame's HTML content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [html]
+              properties:
+                html: { type: string }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a frame
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/flows/{flowId}/approve:
+    post:
+      summary: Approve a flow
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: flowId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approvedBy]
+              properties:
+                approvedBy: { type: string }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/flows/{flowId}/reject:
+    post:
+      summary: Revoke a flow's approval
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: flowId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /site/{slug}:
+    get:
+      summary: Rendered navigable review index for a feature (public, replaces GitHub Pages)
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200': { description: OK, content: { text/html: {} } }
+
+  /site/{slug}/{file}:
+    get:
+      summary: One rendered frame (public)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK, content: { text/html: {} } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Required for all write operations (POST/PUT/DELETE except /health). Reads are public.
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
+  responses:
+    Validation:
+      description: Manifest/body failed validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              details: { type: array, items: { type: string } }
+    Unauthorized:
+      description: Missing/invalid bearer token on a write operation
+    NotFound:
+      description: Feature, flow, or frame not found
+    Conflict:
+      description: Feature slug already exists
+  schemas:
+    FeatureSummary:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        sourceRepo: { type: string, nullable: true }
+        stamp: { type: string, nullable: true }
+        frameCount: { type: integer }
+        flows:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              approved: { type: boolean }
+    Manifest:
+      description: See lib/manifest.schema.json for the authoritative JSON Schema (ported from FuzeFront's design/frames/_template/manifest.schema.json).
+      type: object
+      required: [name, description, designSystem, entry, frames]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        designSystem: { type: string }
+        entry: { type: string }
+        sourceRepo: { type: string, nullable: true }
+        stamp: { type: string, nullable: true }
+        frames:
+          type: array
+          items:
+            type: object
+            required: [id, file, label, summary, testHooks]
+            properties:
+              id: { type: string }
+              file: { type: string }
+              label: { type: string }
+              route: { type: string }
+              flow: { type: string }
+              summary: { type: string }
+              acceptanceNotes: { type: string }
+              testHooks: { type: array, items: { type: string } }
+        contract:
+          type: object
+          properties:
+            openapi: { type: string }
+            client: { type: string }
+            schemas: { type: array, items: { type: string } }
+            endpoints: { type: array, items: { type: string } }
+            component: { type: string }
+            featureFlag: { type: string }
+        build:
+          type: object
+          properties:
+            flows:
+              type: array
+              items:
+                type: object
+                required: [id, orchestrator, route]
+                properties:
+                  id: { type: string }
+                  orchestrator: { type: string }
+                  route: { type: string }
+                  approved: { type: boolean }
+                  approvedBy: { type: string, nullable: true }
+                  approvedAt: { type: string, nullable: true }
+            components: { type: array, items: { type: string } }
+            packages: { type: array, items: { type: string } }

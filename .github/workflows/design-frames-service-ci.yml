@@ -1,0 +1,50 @@
+name: Design Frames Service CI
+
+# CI for services/design-frames-service — kept as its own workflow (not folded
+# into ci.yml) because it has its own package.json/dependency set and should
+# not gate on, or be gated by, the Figma plugin/bridge's root-level test run.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'services/design-frames-service/**'
+      - '.github/workflows/design-frames-service-ci.yml'
+  pull_request:
+    paths:
+      - 'services/design-frames-service/**'
+      - '.github/workflows/design-frames-service-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/design-frames-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test
+        run: npm test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (no push — build-only smoke check)
+        run: docker build -t design-frames-service:ci services/design-frames-service
+      - name: Smoke-check the built image serves /health
+        run: |
+          docker run -d --name dfs-smoke -p 4400:4400 -e DESIGN_FRAMES_API_TOKENS=ci-smoke design-frames-service:ci
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:4400/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4400/health
+          docker logs dfs-smoke
+          docker rm -f dfs-smoke
