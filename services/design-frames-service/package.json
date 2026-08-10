@@ -1,0 +1,23 @@
+{
+  "name": "@fuzex/design-frames-service",
+  "version": "0.1.0",
+  "description": "Standalone product-design-phase service: navigable HTML frames, per-flow approval, and a contract seam — served over REST, MCP, and A2A. Extracted from FuzeFront's design/frames/** pipeline.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "DESIGN_FRAMES_PORT=4400 node server.js",
+    "mcp": "node mcp/server.js",
+    "test": "node tests/stamp.test.cjs && node tests/schema.test.cjs && node tests/store.test.cjs && node tests/server.test.cjs && node tests/mcp.test.cjs"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/izzywdev/FuzeX.git",
+    "directory": "services/design-frames-service"
+  }
+}

@@ -26,7 +26,9 @@
     "requireSignatures": true,
     "deployOnPush": false
   },
-  "providesTo": [],
+  "providesTo": [
+    "FuzeFront"
+  ],
   "dependsOn": [
     "FuzeAgent",
     "FuzeBI",
@@ -42,13 +44,26 @@
         "name": "fuzex-figma-bridge",
         "transport": "stdio",
         "entry": "bridge-server.js"
+      },
+      {
+        "name": "design-frames-service",
+        "transport": "stdio",
+        "entry": "services/design-frames-service/mcp/server.js",
+        "toolManifest": "services/design-frames-service/mcp/tools.json"
       }
     ],
     "entryServer": "fuzex-figma-bridge",
-    "note": "REAL, not a scaffold \u2014 this repo IS an MCP bridge: a Figma plugin (manifest.json, editorType figma/figjam) talking to a localhost MCP server over bridge-server.js. Outstanding for mcp-maintainer: (1) no tools.json declaring the surface or `mutates` per tool \u2014 the plugin protocol in code.js handles start-server/stop-server/mcp-request/client-connect/client-disconnect/get-server-status/ping, which is transport, not a tool manifest; (2) mcp-server-config.json hardcodes an absolute Windows cwd (C:/Users/izzyw/source/FuzeX) so the config is not portable to any other machine or to CI."
+    "note": "REAL, not a scaffold \u2014 this repo IS an MCP bridge: a Figma plugin (manifest.json, editorType figma/figjam) talking to a localhost MCP server over bridge-server.js. Outstanding for mcp-maintainer: (1) fuzex-figma-bridge still has no tools.json declaring its surface or `mutates` per tool \u2014 the plugin protocol in code.js handles start-server/stop-server/mcp-request/client-connect/client-disconnect/get-server-status/ping, which is transport, not a tool manifest; (2) mcp-server-config.json hardcodes an absolute Windows cwd (C:/Users/izzyw/source/FuzeX) so the config is not portable to any other machine or to CI. The second server, design-frames-service, DOES declare tools.json with `mutates` per tool (services/design-frames-service/mcp/tools.json) \u2014 added together with the service in the navigable-frames extraction; see services/design-frames-service/docs/EXTRACTION.md."
+  },
+  "a2a": {
+    "enabled": true,
+    "servingRoles": ["design-review"],
+    "entryRole": "design-review",
+    "external": false,
+    "note": "First A2A onboarding in this repo (no prior a2a block existed). Serving role scaffolded at agent-templates/roles/design-review/role.json, backed by a real service (services/design-frames-service), not a placeholder \u2014 but NOT yet validated against contracts/a2a/v1/card-projection.md (that frozen contract was outside this session's repo scope). a2a-maintainer CI (.github/workflows/a2a-maintain.yml) runs on the PR that introduces this and should reconcile/correct card projection before this is trusted as fully conformant. Platform-repo tenant registration (item 4 in a2a-maintainer's scope) is out of scope for FuzeX itself."
   },
   "portal": {
     "registers": false,
-    "reason": "FuzeX is a Figma/FigJam plugin, not a web app. Its UI runs in Figma's plugin sandbox (manifest.json: editorType [figma, figjam], ui.html) and networkAccess is deliberately restricted to localhost \u2014 there is no served origin to iframe and no remoteEntry to federate. Registering it in the FuzeFront portal would add a side-menu entry that cannot mount anything."
+    "reason": "FuzeX is a Figma/FigJam plugin, not a web app. Its UI runs in Figma's plugin sandbox (manifest.json: editorType [figma, figjam], ui.html) and networkAccess is deliberately restricted to localhost \u2014 there is no served origin to iframe and no remoteEntry to federate. Registering it in the FuzeFront portal would add a side-menu entry that cannot mount anything. design-frames-service is a separate, network-reachable product surface consumed by FuzeFront over API/MCP/A2A (not iframed), so this does not change with its addition."
   }
 }

@@ -1,0 +1,58 @@
+{
+  "role": "design-review",
+  "repo": "izzywdev/FuzeX",
+  "servedBy": "services/design-frames-service",
+  "description": "First A2A serving role in this repo — see .fuze/manifest.json a2a block. Scaffolded against the general Agent Card shape (name/description/skills). NOT yet validated against contracts/a2a/v1/card-projection.md — that frozen contract lives outside this repo's scope for this change. a2a-maintainer CI (.github/workflows/a2a-maintain.yml, runs on every PR) should reconcile/correct this on the PR that introduces it before providesTo/enabled is trusted.",
+  "card": {
+    "name": "FuzeX Design Review",
+    "description": "Manages the product-design phase: navigable HTML frames, per-flow approval, and the API/component/flag contract seam for a feature, served by design-frames-service.",
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false
+    },
+    "defaultInputModes": ["application/json"],
+    "defaultOutputModes": ["application/json"],
+    "skills": [
+      {
+        "id": "list-design-features",
+        "name": "List design features",
+        "description": "List all features currently in the design phase, with frame counts and per-flow approval state.",
+        "tags": ["design", "frames", "read"]
+      },
+      {
+        "id": "get-design-feature",
+        "name": "Get a design feature",
+        "description": "Fetch one feature's manifest (build inventory, contract seam) and every frame's rendered HTML.",
+        "tags": ["design", "frames", "read"]
+      },
+      {
+        "id": "propose-design-frame",
+        "name": "Propose or revise a frame",
+        "description": "Create or replace one navigable HTML frame within a feature, including its acceptance notes and Playwright test hooks.",
+        "tags": ["design", "frames", "write"]
+      },
+      {
+        "id": "approve-design-flow",
+        "name": "Approve a design flow",
+        "description": "Approve one flow within a feature, binding the approval to the feature's current content stamp. Requires an authenticated caller (approvedBy is recorded).",
+        "tags": ["design", "approval", "write"]
+      },
+      {
+        "id": "get-design-review-site",
+        "name": "Get a design review link",
+        "description": "Get the public navigable review-site URL for a feature or a specific frame, for sharing with reviewers.",
+        "tags": ["design", "frames", "read"]
+      }
+    ]
+  },
+  "backing": {
+    "rest": {
+      "openapi": "services/design-frames-service/openapi.yaml"
+    },
+    "mcp": {
+      "server": "design-frames-service",
+      "tools": "services/design-frames-service/mcp/tools.json"
+    }
+  }
+}
