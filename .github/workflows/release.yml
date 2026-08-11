@@ -1,0 +1,166 @@
+name: Release (build + push image, bump prod tag)
+
+# FuzeX had no deployment path at all: no chart, no Argo Application, no image
+# build. services/design-frames-service/Dockerfile has been committed and built by
+# nothing — no docker build, no buildx, no build-push-action in any workflow — so
+# the service ran only on a developer's machine, and FuzeX could not appear in the
+# FuzeFront portal because there was nothing deployed to register.
+#
+# Mirrors the family pattern (FuzePlan / FuzeDeploy / FuzeFinance): build -> push
+# :sha and :latest -> bump the SHA into values-prod.yaml so Argo syncs it. The tag
+# bump IS the release; prod is GitOps and is never hand-deployed.
+#
+# ONE image, not two: design-frames-service serves its own frontend (vanilla
+# HTML/JS/CSS, no bundler) from the same process, so there is no separate nginx
+# pod to build.
+
+on:
+  pull_request:
+    # Build WITHOUT pushing on every PR that touches a build input. The image has
+    # never been compiled, so "does this Dockerfile build?" is an open question
+    # that belongs in a PR rather than on master.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'services/design-frames-service/**'
+      - '.github/workflows/release.yml'
+  push:
+    branches: [master]
+    # `deploy/**` is DELIBERATELY ABSENT. The bump job commits to
+    # deploy/helm/fuzex/values-prod.yaml under a real user's PAT — an identity
+    # whose pushes DO start workflows — so listing the chart here would make every
+    # release re-trigger itself. Chart edits need no rebuild anyway.
+    paths:
+      - 'services/design-frames-service/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Override image tag (default: short SHA)'
+        required: false
+        default: ''
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/izzywdev/fuzex-design-frames-service
+
+jobs:
+  build-push:
+    name: Build image${{ github.event_name == 'pull_request' && ' (no push)' || ' & push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            TAG="$(git rev-parse --short=12 HEAD)"
+          fi
+          echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Context is the SERVICE directory, not the repo root: the Dockerfile copies
+      # `package.json` and `.` relative to itself, and the repo root holds the
+      # unrelated Figma plugin/bridge sources.
+      - name: Build design-frames-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/design-frames-service
+          file: ./services/design-frames-service/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha,scope=fuzex-design-frames-service
+          cache-to: type=gha,scope=fuzex-design-frames-service,mode=max
+
+  bump-prod-values:
+    name: Bump prod image tag (GitOps release)
+    needs: build-push
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      # FAIL LOUDLY rather than skipping. A release that publishes an image and
+      # leaves values-prod.yaml pinned to the previous tag looks green and ships
+      # nothing. If this step is the only red one, the image IS published and only
+      # the prod pin is missing.
+      - name: Require the release credential
+        env:
+          PAT: ${{ secrets.GH_RELEASE_PAT }}
+        run: |
+          if [ -z "${PAT}" ]; then
+            echo "::error::GH_RELEASE_PAT is not set on this repository, so the prod tag cannot be bumped."
+            echo "::error::The image for ${{ needs.build-push.outputs.image_tag }} was built and pushed, but values-prod.yaml still pins the OLD tag."
+            echo "::error::Add a classic PAT with 'repo' scope as GH_RELEASE_PAT (the same secret FuzePlan uses), then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Bump the image tag in values-prod.yaml
+        env:
+          TAG: ${{ needs.build-push.outputs.image_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$TAG" <<'PY'
+          import re, sys
+          tag = sys.argv[1]
+          path = "deploy/helm/fuzex/values-prod.yaml"
+          s = open(path, encoding="utf-8").read()
+          pat = re.compile(r'(^image:\n(?:\s*#.*\n)*\s*tag:\s*)"?[^"\s]+"?', re.MULTILINE)
+          s, n = pat.subn(lambda m: m.group(1) + f'"{tag}"', s, count=1)
+          if n != 1:
+              raise SystemExit(f"FATAL: could not find the image tag line in {path} — refusing to release a half-bumped overlay")
+          open(path, "w", encoding="utf-8", newline="\n").write(s)
+          print(f"bumped {path} -> {tag}")
+          PY
+          git --no-pager diff -- deploy/helm/fuzex/values-prod.yaml
+
+      - name: Commit the bump via the GitHub API (server-side signed)
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
+          TAG: ${{ needs.build-push.outputs.image_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          F=deploy/helm/fuzex/values-prod.yaml
+          if git diff --quiet -- "$F"; then
+            echo "No change to $F — already at ${TAG}."
+            exit 0
+          fi
+          SHA=$(gh api "repos/${{ github.repository }}/contents/$F?ref=master" --jq .sha)
+          gh api -X PUT "repos/${{ github.repository }}/contents/$F" \
+            -f message="chore(release): bump fuzex prod image tag to ${TAG}" \
+            -f content="$(base64 -w0 "$F")" \
+            -f sha="$SHA" \
+            -f branch=master >/dev/null
+          echo "Committed prod tag bump to ${TAG}. NOTE: values-prod.yaml still has enabled:false — flipping it on is a separate, deliberate PR."

@@ -1,0 +1,33 @@
+{{- if and .Values.enabled .Values.persistence.enabled }}
+{{/*
+The design record itself. Every feature manifest, frame, content stamp and
+per-flow APPROVAL lives here as files (lib/store.js) — there is no database, so
+this claim IS the durable state. Losing it silently un-approves designs a human
+signed off on, which is why the Deployment above refuses to run more than one
+replica against it.
+
+ReadWriteOnce because a single writer is the store's assumption, not a
+limitation of the storage class.
+
+`helm.sh/resource-policy: keep` so an uninstall — or an Argo prune — does not
+delete the approvals along with the release. A PVC is cheap to leave behind and
+impossible to recover once collected.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "fuzex.fullname" . }}-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+{{- end }}
