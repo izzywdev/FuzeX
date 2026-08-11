@@ -1,26 +1,44 @@
 # design-frames-service
 
-Standalone product-design-phase service: navigable HTML frames, a per-flow
-approval workflow, and the API/component/flag contract seam — consumable over
-**REST**, **MCP**, and **A2A**. Extracted from FuzeFront's `design/frames/**`
-pipeline (see [`docs/EXTRACTION.md`](./docs/EXTRACTION.md)) into its own
-repo/product so any consumer, not just FuzeFront, can drive design review
-against it.
+FuzeX's product for the **lifecycle** of navigable HTML design frames — per-flow
+approval/reject and a navigable review site — consumable over **REST**, **MCP**, and
+**A2A**. Modeled on FuzeFront's `design/frames/**` pipeline (see
+[`docs/EXTRACTION.md`](./docs/EXTRACTION.md)), reimplemented here as a real, shared
+backend so any product can drive design review against it — but the frames themselves
+are **not authored or stored here as this repo's own files**. See
+[`skills/design-frames-lifecycle/SKILL.md`](./skills/design-frames-lifecycle/SKILL.md)
+for the full story; the short version is next.
+
+## Frames are data, not this repo's content
+
+Treat a feature's navigable HTML frames the way you'd treat a `.fig` file: it's
+authored and version-controlled in the product repo that owns the feature —
+`design/frames/<feature>/` in FuzeFront, or wherever the equivalent lives in another
+product's repo — never inside `izzywdev/FuzeX` itself. This service ingests that
+content (via its client package, `client/design-frames-client.mjs`, or directly over
+the REST/MCP API) and becomes the system of record for its **lifecycle** — per-flow
+approval/reject bound to a content stamp, and a navigable review site — the same way a
+design tool becomes the system of record for a file's review state without becoming
+the only place that file exists. Content is re-synced from the owning repo whenever it
+changes; approval/reject state and the review site live here.
 
 ## What it replaces (and what it doesn't — yet)
 
-FuzeFront's original pipeline authored frames as files directly in its own
-repo (`design/frames/<feature>/`), stamped them with a content hash
-(`scripts/stamp-frames.mjs`), approved flows via a GitHub Issue + a deploy-key
-push to `master` (`design-approval.yml`), and published a static site to
-GitHub Pages (`pages-frames.yml`). This service reimplements the same
-*concepts* — content stamping, per-flow approval, a navigable review site —
-as a real backend with a REST API, so approval state lives in one place
-instead of being written back into whichever repo asked for it.
+FuzeFront's original pipeline authored frames as files directly in its own repo
+(`design/frames/<feature>/`), stamped them with a content hash
+(`scripts/stamp-frames.mjs`), approved flows via a GitHub Issue + a deploy-key push to
+`master` (`design-approval.yml`), and published a static site to GitHub Pages
+(`pages-frames.yml`). Frame **authorship stays exactly there** — this service
+reimplements the *lifecycle* concepts on top of it — content stamping, per-flow
+approval, a navigable review site — as a real backend with a REST API, so approval
+state (and the review UI) live in one shared place instead of being reinvented per
+repo.
 
-**FuzeFront's 14 existing `design/frames/<feature>/` directories are
-untouched** — this is a plumbing-only extraction (see the FuzeFront-side PR).
-New features going forward are authored here.
+**FuzeFront's 14 existing `design/frames/<feature>/` directories, and every new one it
+creates, stay in FuzeFront's own repo** — nothing migrates. Any product — FuzeFront or
+otherwise — installs the [`design-frames-lifecycle`](./skills/design-frames-lifecycle/SKILL.md)
+skill and its client package to sync locally-authored frames here for approval/reject
+tracking and navigability.
 
 ## Run it
 
