@@ -1,0 +1,78 @@
+# =============================================================================
+# FuzeX — design-frames-service chart defaults.
+#
+# `enabled` is FALSE here and TRUE only in the prod overlay, deliberately: this
+# chart had no existence before, so a default-on chart would start deploying the
+# moment anything renders it, ahead of the image and the sealed token existing.
+# =============================================================================
+enabled: false
+
+image:
+  repository: ghcr.io/izzywdev/fuzex-design-frames-service
+  # Bumped by .github/workflows/release.yml on every push to master; Argo detects
+  # the diff and rolls it. Never edit this by hand in the prod overlay.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+service:
+  # Matches DESIGN_FRAMES_PORT, which the image also defaults to. Kept as one
+  # value so the container port, the Service port and the probe target cannot
+  # drift apart.
+  port: 4400
+
+# -- persistence: NOT optional in any environment where approvals matter.
+# lib/store.js writes every feature, frame, manifest, content stamp and per-flow
+# approval as files under mountPath. There is no database. With
+# `enabled: false` the Deployment falls back to an emptyDir and every approval is
+# lost on pod restart — which reads as "the design was never signed off".
+persistence:
+  enabled: true
+  # Empty = the cluster's default StorageClass. Set explicitly if the default is
+  # not the one you want this to land on.
+  storageClass: ""
+  size: 2Gi
+  mountPath: /data/features
+
+# -- write authentication. Reads (including the public /site review surface) are
+# unauthenticated by the service's own design; writes need a Bearer token from
+# this Secret. `optional: true` in the pod spec, so a missing secret brings the
+# service up READ-ONLY rather than CrashLooping — every write 401s, which is a
+# safe state and a visible one.
+apiTokens:
+  existingSecret: fuzex-api-tokens
+  secretKey: DESIGN_FRAMES_API_TOKENS
+
+# -- ingress: the public origin registration/manifest.json points integration.url
+# at. Disabled and hostless — the name needs DNS + the Cloudflare tunnel, which
+# are FuzeInfra's to provide. Enabling without a host fails the render on purpose.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+
+# -- registration with the FuzeFront app registry, as a fail-closed init
+# container. The payload is this repo's registration/ directory, vendored into
+# files/registration/ because Helm's .Files cannot read above the chart dir;
+# scripts/check-registration.mjs fails CI if the two copies diverge.
+registration:
+  enabled: true
+  # alpine, not a bespoke image: register.sh needs only sh + curl + jq, which the
+  # init container installs. Nothing product-specific is required, so there is no
+  # image here to drift against FuzeX's own build.
+  image: alpine:3.20
+  apiUrl: http://fuzefront-applications.fuzefront.svc.cluster.local:3003
+  # Must be sealed into the fuzex namespace. NOT optional in the pod spec: a
+  # missing secret fails the pod rather than skipping registration silently.
+  secretName: fuzefront-registration
+  # Rendered by templates/registration-configmap.yaml in THIS chart — never
+  # created by hand. A kubectl one-liner is not a CI/CD registration path, and a
+  # pod referencing a ConfigMap nothing creates hangs in ContainerCreating rather
+  # than failing loudly.
+  configMapName: fuzex-registration
+
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 512Mi }

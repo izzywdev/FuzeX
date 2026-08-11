@@ -1,0 +1,35 @@
+{
+  "manifestVersion": "1",
+  "slug": "fuzex",
+  "name": "FuzeX",
+  "menuLabel": "FuzeX",
+  "description": "Design-phase workspace: navigable HTML frames, per-flow approval bound to a content stamp, and the contract seam between a design and its implementation.",
+  "icon": {
+    "kind": "emoji",
+    "value": "🎛️"
+  },
+  "mode": "portal",
+  "modes": [
+    "portal",
+    "standalone"
+  ],
+  "builtin": false,
+  "integration": {
+    "type": "spa",
+    "url": "https://fuzex.prod.fuzefront.com"
+  },
+  "nav": {
+    "section": "build",
+    "order": 50
+  },
+  "chrome": {
+    "menu": "host",
+    "topbar": "host"
+  },
+  "routing": {
+    "path": "/app/fuzex",
+    "host": "fuzex.prod.fuzefront.com"
+  },
+  "visibility": "organization",
+  "roles": []
+}

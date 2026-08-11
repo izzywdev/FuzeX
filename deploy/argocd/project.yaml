@@ -1,0 +1,35 @@
+# =============================================================================
+# Argo CD AppProject — fuzex
+# =============================================================================
+# The destination/security boundary for this repo's Application: it may deploy
+# only from this repo, and only into the `fuzex` namespace.
+#
+# A project that constrains the WHOLE fleet belongs in FuzeInfra
+# (argocd/projects/). This one constrains FuzeX alone, so it ships here —
+# the shape fuzesocial, fuzekeys and fuzeplan already use, and the one
+# FuzeInfra's argocd-register workflow expects ("Path in the consumer repo
+# holding the Argo Application/AppProject manifests"; it `kubectl apply`s the
+# whole directory).
+#
+# Without this, `project: fuzex` in application.yaml names a project that
+# does not exist and the Application never syncs.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: fuzex
+  namespace: argocd
+spec:
+  description: FuzeX — deployment control plane
+  sourceRepos:
+    - 'https://github.com/izzywdev/FuzeX.git'
+    - 'https://github.com/izzywdev/FuzeX'
+  destinations:
+    - namespace: fuzex
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

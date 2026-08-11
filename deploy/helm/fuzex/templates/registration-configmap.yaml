@@ -1,0 +1,43 @@
+{{- if .Values.registration.enabled }}
+{{/*
+The registration payload the init container mounts, carried INLINE from this
+repo's registration/ directory via .Files.Get.
+
+WHY THIS TEMPLATE EXISTS AT ALL. The chart previously mounted TWO ConfigMaps that
+nothing created:
+
+  * `fuzex-registration` — registration/README.md said it was "created at
+    deploy time" by a `kubectl create configmap` one-liner. Under Argo GitOps
+    nobody runs that one-liner, and a manual kubectl step is not a CI/CD
+    registration path in the first place.
+  * `fuzefront-onboarding-kit`  — the shared kit ConfigMap holding register.sh. A
+    ConfigMap is NAMESPACE-scoped, so it would have to exist in `fuzex`
+    before this chart could start, and nothing in this repo or FuzeFront puts it
+    there.
+
+A pod whose volumes reference a missing ConfigMap does not CrashLoop with a
+useful error — it sits in ContainerCreating indefinitely. So the fail-closed init
+container, which exists precisely so registration failures are loud, would have
+failed in the one way that is silent.
+
+Reading the files the repo already owns keeps the chart self-contained and makes
+the ConfigMap's contents reviewable in the same diff as the script that runs
+them. Helm's .Files cannot read above the chart directory, hence the vendored
+copies under files/; scripts/check-registration.mjs fails CI if they drift.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.registration.configMapName | quote }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registration
+data:
+  manifest.json: |
+{{ .Files.Get "files/registration/manifest.json" | indent 4 }}
+  policy.json: |
+{{ .Files.Get "files/registration/policy.json" | indent 4 }}
+  register.sh: |
+{{ .Files.Get "files/registration/register.sh" | indent 4 }}
+{{- end }}

@@ -186,6 +186,28 @@ async function handleRequest(req, res) {
   try {
     if (url.pathname === '/health') return sendJson(res, 200, { status: 'healthy', timestamp: Date.now() });
 
+    // ─── The contract, served by the thing that implements it ───
+    // openapi.yaml was committed next to this file and reachable over HTTP from
+    // NOWHERE, so the only way to see what this service accepts was to open the
+    // repository. A contract nobody can fetch cannot be checked against a running
+    // instance, which is most of the point of publishing one — a client generated
+    // from a stale copy fails at runtime with nothing to notice it sooner.
+    //
+    // Read per request rather than cached at startup: the file is a few KB, this
+    // is not a hot path, and a cached copy would go stale against a mounted spec
+    // with no signal that it had.
+    if (req.method === 'GET' && (url.pathname === '/openapi.yaml' || url.pathname === '/openapi.json')) {
+      const spec = await fs.readFile(path.join(__dirname, 'openapi.yaml'), 'utf8');
+      // The source of truth is YAML. `/openapi.json` is accepted because tooling
+      // asks for it by convention, and answers with the SAME bytes under the YAML
+      // content type rather than a half-converted document: every OpenAPI parser
+      // reads YAML, and no consumer is handed something that claims to be JSON and
+      // is not.
+      res.writeHead(200, { 'Content-Type': 'application/yaml; charset=utf-8' });
+      res.end(spec);
+      return;
+    }
+
     // ─── Static frontend (vanilla HTML/JS/CSS, no build step) ───
     if (req.method === 'GET' && STATIC_FILES[url.pathname]) {
       const spec = STATIC_FILES[url.pathname];
