@@ -1,10 +1,32 @@
 # Extraction record: FuzeFront's navigable-frames pipeline → FuzeX
 
-**Date:** 2026-08-10
+**Date:** 2026-08-10. **Corrected:** 2026-08-11 — see *Correction* below; this record's
+original "Why"/"What's different" sections described the wrong split and are kept here
+struck through for history, with the corrected model following.
+
 **Origin PR (FuzeFront):** see `docs/planning/design-first-ui-pipeline.md` in
 that repo for the pipeline this was ported from.
 
-## Why
+## Correction (2026-08-11): frames stay in the owning repo; FuzeX owns lifecycle, not storage
+
+The first pass of this extraction (below) read as "new features author their frames in
+FuzeX instead of their own repo." That's wrong, and got corrected before it shipped
+broadly: **frames are data, like a `.fig` file** — authored and version-controlled in
+whichever product repo owns the feature (FuzeFront's `design/frames/<feature>/` for
+FuzeFront features, and the equivalent in any other consuming repo), the same way they
+always were. FuzeX/design-frames-service is the **product that manages their lifecycle**
+— per-flow approval/reject and a navigable review site — not their storage location or
+their authoring tool. A consuming repo keeps authoring frames locally exactly as before,
+then installs the [`design-frames-lifecycle`](../skills/design-frames-lifecycle/SKILL.md)
+skill + its client package (`../client/design-frames-client.mjs`) to sync that content
+here. See the service's [README.md](../README.md) for the corrected framing in full.
+
+This reverses FuzeFront's `gate-frames-external` (which blocked new local
+`design/frames/<feature>/` directories) — that gate is being removed on the FuzeFront
+side as part of this correction; new features go back to being authored locally there,
+same as the 14 that were never touched.
+
+## Why (original — see Correction above for what actually applies)
 
 FuzeFront's "design-first" gate (its `CLAUDE.md` §"Design-first gate") built
 navigable HTML frames as the authoritative pre-implementation design
@@ -14,8 +36,9 @@ published to GitHub Pages. It worked, but it was implemented as files +
 scripts + CI glue *inside FuzeFront's own repo* — closer to what a standalone
 design-tool product looks like than a feature of a Module-Federation host
 shell. FuzeX — an AI-driven design/Figma-adjacent tool — is a more natural
-home for it than FuzeFront's own repo, and hosting it there lets it be
-consumed by more than one product.
+home for **the lifecycle machinery** (approval/reject + navigable review) than
+FuzeFront's own repo, and hosting *that* there lets it be shared by more than
+one product — the frame files themselves were never meant to relocate.
 
 ## What was ported vs. reimplemented
 
@@ -34,10 +57,13 @@ FuzeFront-side PR). This service reimplements the same mechanisms:
 
 ## What's intentionally different
 
-- **Incremental authorship over an API**, not whole-feature file authorship.
-  A feature starts as a shell (`POST /features`) and frames are added one at
-  a time (`PUT .../frames/:file`), rather than being written to disk all at
-  once and committed as a single PR.
+- **Ingestion over an API, not authorship.** A feature starts as a shell
+  (`POST /features`) and frames are pushed one at a time (`PUT .../frames/:file`) by
+  the owning repo's sync step (see the `design-frames-lifecycle` skill) — this service
+  never originates frame content. FuzeFront's original wrote frames to disk and
+  committed them as a single PR; that step is unchanged and still happens in
+  FuzeFront's own repo. What's incremental here is the *publish* of already-authored
+  content, not the authoring itself.
 - **File-backed storage, not a database** — matches this repo's
   dependency-light convention (see `bridge-server.js`'s single `uuid`
   dependency). Directory-per-feature layout deliberately mirrors FuzeFront's
@@ -49,8 +75,10 @@ FuzeFront-side PR). This service reimplements the same mechanisms:
 
 ## What's explicitly deferred (not done in this extraction)
 
-- **FuzeFront's 14 existing features are not migrated.** They stay in
-  FuzeFront's repo, frozen, until a follow-up decides to move them.
+- **FuzeFront's 14 existing features (and every feature after them) are not
+  migrated, and never will be — see the Correction above.** They stay authored in
+  FuzeFront's repo permanently; syncing them here (optional, via
+  `design-frames-lifecycle`) is additive, not a move.
 - **No Module-Federation embed.** FuzeFront consumes this service over its
   REST API from CI (plumbing-only integration); the frontend here is not
   mounted inside the FuzeFront shell. FuzeX currently has zero frontend build
