@@ -43,9 +43,15 @@ function request(port, options, body) {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
+        // `raw` and `headers` are exposed alongside the parsed body because not
+        // every response IS JSON — /openapi.yaml is YAML, and asserting on it
+        // through `data` would silently compare `null` to `null` and pass no
+        // matter what the server returned. Purely additive: `status` and `data`
+        // are unchanged for every existing test.
+        const raw = Buffer.concat(chunks).toString('utf8');
         let data = null;
-        try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (_) {}
-        resolve({ status: res.statusCode, data });
+        try { data = JSON.parse(raw); } catch (_) {}
+        resolve({ status: res.statusCode, data, raw, headers: res.headers });
       });
     });
     req.on('error', reject);
@@ -151,6 +157,30 @@ async function main() {
   await test('approving does not change the stamp', async () => {
     const res = await request(port, { method: 'GET', path: '/api/v1/features/checkout-redesign/stamp' });
     assert.strictEqual(res.data.current, true, 'stamp recorded before approval still matches after approval');
+  });
+
+  // The contract has to be reachable from the running service, not just present
+  // in the repository — an unfetchable openapi.yaml cannot be diffed against the
+  // instance actually serving traffic, which is most of what publishing one buys.
+  await test('GET /openapi.yaml serves the contract, unauthenticated', async () => {
+    const res = await request(port, { method: 'GET', path: '/openapi.yaml' });
+    assert.strictEqual(res.status, 200);
+    assert.match(res.headers['content-type'] || '', /yaml/);
+    assert.match(res.raw, /^openapi: 3\./m, 'body is not the OpenAPI document');
+    assert.match(res.raw, /design-frames-service/, 'served spec is not this service');
+  });
+
+  await test('GET /openapi.json serves the same bytes, not a half-conversion', async () => {
+    // Accepted because tooling asks for it by convention. It must NOT claim to be
+    // JSON while returning YAML, and it must not diverge from /openapi.yaml.
+    const [yaml, json] = await Promise.all([
+      request(port, { method: 'GET', path: '/openapi.yaml' }),
+      request(port, { method: 'GET', path: '/openapi.json' }),
+    ]);
+    assert.strictEqual(json.status, 200);
+    assert.strictEqual(json.raw, yaml.raw, '/openapi.json and /openapi.yaml disagree');
+    assert.doesNotMatch(json.headers['content-type'] || '', /application\/json/,
+      'served YAML under a JSON content type');
   });
 
   await test('unknown route 404s', async () => {

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fuzex
+description: FuzeX design-frames-service — navigable HTML frames, per-flow approval, and the design/implementation contract seam
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
