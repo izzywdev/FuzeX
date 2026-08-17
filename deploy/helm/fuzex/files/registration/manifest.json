@@ -15,8 +15,10 @@
   ],
   "builtin": false,
   "integration": {
-    "type": "spa",
-    "url": "https://fuzex.prod.fuzefront.com"
+    "type": "module-federation",
+    "remoteEntry": "/apps/fuzex/remoteEntry.js",
+    "scope": "fuzex",
+    "module": "./DesignFramesApp"
   },
   "nav": {
     "section": "build",
@@ -27,8 +29,7 @@
     "topbar": "host"
   },
   "routing": {
-    "path": "/app/fuzex",
-    "host": "fuzex.prod.fuzefront.com"
+    "path": "/app/fuzex"
   },
   "visibility": "organization",
   "roles": []
