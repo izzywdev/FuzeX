@@ -113,6 +113,13 @@ spec:
               value: {{ .Values.service.port | quote }}
             - name: DESIGN_FRAMES_DATA_DIR
               value: {{ .Values.persistence.mountPath | quote }}
+            {{- if .Values.webapp.dir }}
+            # Override only — the image's own ENV DESIGN_FRAMES_WEBAPP_DIR
+            # (/app/webapp-dist, where the Dockerfile's builder stage lands
+            # webapp/'s build) applies when this is unset.
+            - name: DESIGN_FRAMES_WEBAPP_DIR
+              value: {{ .Values.webapp.dir | quote }}
+            {{- end }}
             # Write operations require a Bearer token; reads and the public /site
             # review surface do not. Absent, EVERY write 401s — which is a safe
             # default, not a working one, so the secret is referenced rather than

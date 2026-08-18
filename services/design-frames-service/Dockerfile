@@ -1,15 +1,47 @@
-# design-frames-service — no build step (vanilla JS, no bundler), so the
-# image just copies source and installs the (currently empty) dependency set.
-FROM node:20-alpine
+# design-frames-service — two build inputs now:
+#   1. the service itself (vanilla JS, no bundler, no build step)
+#   2. webapp/ — a Vite/React Module-Federation remote (scope "fuzex", exposes
+#      ./DesignFramesApp) that DOES need a build step. Stage 1 builds it to
+#      dist/ and stage 2 copies the built assets in; server.js serves them at
+#      /apps/fuzex/ (see the DESIGN_FRAMES_WEBAPP_DIR route).
+#
+# webapp/'s own package.json/.nvmrc pin Node >=24 (the family's MF-remote
+# toolchain floor — see FuzeFront CLAUDE.md "Toolchain baseline"), so the
+# builder stage uses node:24-alpine regardless of the runtime stage's line.
+#
+# webapp/'s dependency on the private @izzywdev/fuzefront-design-system
+# (GitHub Packages) needs a read:packages token at `npm install` time.
+# Supplied via a BuildKit secret mount (`--mount=type=secret,id=github_token`)
+# so the token never lands in an image layer or the build cache — webapp/.npmrc
+# already reads it as ${GITHUB_TOKEN}.
+FROM node:24-alpine AS webapp-builder
+WORKDIR /webapp
+COPY webapp/package.json webapp/.npmrc ./
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" && \
+    npm install --no-audit --no-fund
+COPY webapp/ ./
+RUN npm run build
 
+# Runtime stays on node:20-alpine (unchanged): the service's own package.json
+# declares `engines.node: >=18.0.0` and the rest of this repo's CI still runs
+# on the Node 20 line (see ci.yml, design-frames-service-ci.yml) — server.js
+# itself needs no Node 24 feature, only the webapp build tooling does, and
+# that's isolated to the builder stage above. Bumping the runtime line is a
+# separate, repo-wide toolchain decision, not bundled into this change.
+FROM node:20-alpine
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund || true
 COPY . .
+# Built Module-Federation remote (webapp/'s dist/) — served at /apps/fuzex/ by
+# server.js's DESIGN_FRAMES_WEBAPP_DIR route, same-origin, no CORS needed.
+COPY --from=webapp-builder /webapp/dist ./webapp-dist
 
 ENV DESIGN_FRAMES_HOST=0.0.0.0
 ENV DESIGN_FRAMES_PORT=4400
 ENV DESIGN_FRAMES_DATA_DIR=/data/features
+ENV DESIGN_FRAMES_WEBAPP_DIR=/app/webapp-dist
 RUN mkdir -p /data/features && chown -R node:node /data/features /app
 VOLUME ["/data/features"]
 

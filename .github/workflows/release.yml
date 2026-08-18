@@ -54,6 +54,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # webapp/'s builder stage `npm install`s the private
+      # @izzywdev/fuzefront-design-system from GitHub Packages — see the
+      # "package-access prerequisite" note below the build step.
     outputs:
       image_tag: ${{ steps.tag.outputs.image_tag }}
     steps:
@@ -103,6 +106,17 @@ jobs:
       # Context is the SERVICE directory, not the repo root: the Dockerfile copies
       # `package.json` and `.` relative to itself, and the repo root holds the
       # unrelated Figma plugin/bridge sources.
+      # webapp/'s builder stage `npm install`s the private
+      # @izzywdev/fuzefront-design-system from GitHub Packages (webapp/.npmrc
+      # reads ${GITHUB_TOKEN}). Passed as a BuildKit secret (not a build-arg
+      # or ENV), so it never lands in an image layer or the layer cache.
+      #
+      # PREREQUISITE this workflow cannot satisfy from code: the default
+      # Actions GITHUB_TOKEN can read @izzywdev/* GitHub Packages ONLY if that
+      # package's settings grant this repo (izzywdev/FuzeX) Actions access
+      # (package → Manage Actions access). If it doesn't, `npm install` 401s
+      # here and this step goes red — see the docker-build job's identical
+      # dependency in design-frames-service-ci.yml.
       - name: Build design-frames-service image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
@@ -112,6 +126,8 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ steps.tag.outputs.image_tag }}
             ${{ env.IMAGE }}:latest
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha,scope=fuzex-design-frames-service
           cache-to: type=gha,scope=fuzex-design-frames-service,mode=max
 
