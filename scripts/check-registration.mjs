@@ -1,110 +1,213 @@
 #!/usr/bin/env node
-// Checks on FuzeX's FuzeFront registration payload that the shared
-// validator does not make.
-//
-// `@fuzefront/onboarding-kit`'s validate-registration.mjs is a FLEET-POLICY
-// checker by design — it asserts conventions "no schema can express" and
-// deliberately does not re-validate against the AppManifest schema.
-//
-// That leaves nav.section unchecked anywhere in a product's own repository, and
-// FuzeFinance is the precedent: it shipped `nav.section: "business"` — a
-// perfectly plausible section name that is not in NavSection at all — and every
-// gate passed it. The platform parses the manifest with
-// `registerAppRequestSchema.safeParse` (backend/applications/src/routes/
-// app-registry.ts), whose `navSchema.section` is `z.enum(NAV_SECTIONS)`, so an
-// unknown section fails the parse, `POST /apps` answers 400, and register.sh
-// treats any non-201/409 as fatal — the pod CrashLoopBackOffs and the product
-// never appears in the portal.
-//
-// FuzeX's own section is already valid. This check is here so it stays
-// that way: an edit to nav should cost a red build, not a CrashLoop.
-//
-// Exit 0 = coherent. Exit 1 = do not merge.
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+/**
+ * Guards the AuthZ-policy half of FuzeFront registration. Zero dependencies —
+ * runs on a bare `actions/setup-node` with no install step.
+ *
+ *   node scripts/check-registration.mjs
+ *
+ * Two checks, for the two ways this silently breaks:
+ *
+ * 1. `registration/policy.json` is VALID against FuzeFront's frozen ProductPolicy
+ *    contract. An invalid policy is rejected with a 400 inside an init container at
+ *    deploy time — an error in a pod log nobody tails. A policy that is *accepted*
+ *    but whose role names an action the document never declares is worse: nothing
+ *    errors anywhere, Permit creates the role, and it grants nothing. The symptom is
+ *    "our users have no permissions", which reads as a bug in this app.
+ *
+ * 2. The registration ConfigMap actually SHIPS that policy, byte-equivalent. The
+ *    ConfigMap inlines its own copies of the registration files, so the file in this
+ *    repo is decorative unless the ConfigMap carries it — which is exactly how this
+ *    app ended up with a committed, correct policy.json that no deploy ever sent.
+ *
+ * Mirrors bin/validate-policy.mjs in @fuzefront/onboarding-kit. Keep in step with it.
+ */
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
-const SOURCE = join(ROOT, 'registration')
-const VENDORED = join(ROOT, 'deploy/helm/fuzex/files/registration')
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
-// Mirrors NAV_SECTIONS in FuzeFront's
-// backend/applications/src/app-registry/manifest.schema.ts. The ARRAY ORDER is
-// the portal's render order, so this list is also the menu's lifecycle:
-// steer -> plan -> build -> sell -> serve -> measure -> operate.
-const NAV_SECTIONS = [
-  'executive',
-  'plan',
-  'build',
-  'revenue',
-  'customer',
-  'insight',
-  'platform',
-]
+const POLICY_PATH = 'registration/policy.json'
+
+// `_` is the `<slug>_<Key>` namespace separator FuzeFront prepends; a bare key
+// containing one could not be split back apart.
+const BARE_KEY_RE = /^[A-Za-z][A-Za-z0-9-]*$/
+const PERMISSION_RE = /^[A-Za-z][A-Za-z0-9-]*:[A-Za-z][A-Za-z0-9_-]*$/
+const TOP_LEVEL = new Set(['product', 'name', 'resources', 'roles'])
 
 const problems = []
+const fail = m => problems.push(m)
 
-let manifest = null
-try {
-  manifest = JSON.parse(readFileSync(join(SOURCE, 'manifest.json'), 'utf8'))
-} catch (err) {
-  console.error(`✘ registration/manifest.json is unreadable or invalid JSON: ${err.message}`)
-  process.exit(1)
+// ── 1. the policy itself ──────────────────────────────────────────────────────
+if (!existsSync(POLICY_PATH)) {
+  fail(`${POLICY_PATH} is missing — this app declares no roles to FuzeFront`)
 }
 
-const section = manifest.nav?.section
-if (section === undefined) {
-  problems.push('nav.section is absent — the app would sort last, in "platform", by default rather than by decision')
-} else if (!NAV_SECTIONS.includes(section)) {
-  problems.push(
-    `nav.section "${section}" is not a NavSection. The platform rejects the manifest with 400 and register.sh treats that as fatal, so the pod CrashLoopBackOffs. Valid: ${NAV_SECTIONS.join(', ')}`
+let policy = null
+if (existsSync(POLICY_PATH)) {
+  const raw = readFileSync(POLICY_PATH, 'utf8')
+  try {
+    policy = JSON.parse(raw)
+  } catch (err) {
+    fail(`${POLICY_PATH} is not valid JSON — ${err.message}`)
+  }
+}
+
+if (policy) {
+  for (const k of Object.keys(policy)) {
+    if (!TOP_LEVEL.has(k)) {
+      fail(
+        `${POLICY_PATH}: unknown top-level key "${k}". FuzeFront's schema is strict ` +
+          `(additionalProperties:false) — the whole PUT would 400.`
+      )
+    }
+  }
+
+  const resources = Array.isArray(policy.resources) ? policy.resources : []
+  const roles = Array.isArray(policy.roles) ? policy.roles : []
+  if (!Array.isArray(policy.resources)) fail(`${POLICY_PATH}: resources must be an array`)
+  if (!Array.isArray(policy.roles)) fail(`${POLICY_PATH}: roles must be an array`)
+
+  const actionsByResource = new Map()
+  for (const [i, r] of resources.entries()) {
+    if (!BARE_KEY_RE.test(r?.key ?? '')) {
+      fail(`${POLICY_PATH}: resources[${i}].key "${r?.key}" must match ${BARE_KEY_RE} (no "_")`)
+      continue
+    }
+    if (actionsByResource.has(r.key)) fail(`${POLICY_PATH}: duplicate resource "${r.key}"`)
+    const actions = Object.keys(r.actions ?? {})
+    if (actions.length === 0) fail(`${POLICY_PATH}: resource "${r.key}" declares no actions`)
+    actionsByResource.set(r.key, new Set(actions))
+  }
+
+  const seenRoles = new Set()
+  for (const [i, role] of roles.entries()) {
+    if (!BARE_KEY_RE.test(role?.key ?? '')) {
+      fail(`${POLICY_PATH}: roles[${i}].key "${role?.key}" must match ${BARE_KEY_RE} (no "_")`)
+      continue
+    }
+    if (seenRoles.has(role.key)) fail(`${POLICY_PATH}: duplicate role "${role.key}"`)
+    seenRoles.add(role.key)
+    for (const perm of role.permissions ?? []) {
+      if (!PERMISSION_RE.test(perm)) {
+        fail(`${POLICY_PATH}: role "${role.key}" permission "${perm}" is malformed`)
+        continue
+      }
+      const [resKey, action] = perm.split(':')
+      const actions = actionsByResource.get(resKey)
+      if (!actions) {
+        fail(`${POLICY_PATH}: role "${role.key}" references undeclared resource "${resKey}"`)
+      } else if (!actions.has(action)) {
+        fail(`${POLICY_PATH}: role "${role.key}": resource "${resKey}" has no action "${action}"`)
+      }
+    }
+  }
+}
+
+// ── 2. the ConfigMap actually ships it ────────────────────────────────────────
+function findConfigMaps(dir, found = []) {
+  if (!existsSync(dir)) return found
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.git') continue
+    const p = join(dir, entry)
+    if (statSync(p).isDirectory()) findConfigMaps(p, found)
+    else if (/registration.*\.ya?ml$|configmap.*registration.*\.ya?ml$/i.test(entry)) {
+      const text = readFileSync(p, 'utf8')
+      if (/kind:\s*ConfigMap/.test(text) && /manifest\.json:\s*\|/.test(text)) found.push([p, text])
+    }
+  }
+  return found
+}
+
+const configMaps = [...findConfigMaps('helm'), ...findConfigMaps('deploy')]
+if (configMaps.length === 0) {
+  fail(
+    'no registration ConfigMap found under helm/ or deploy/ — cannot prove the ' +
+      'policy is mounted into the init container'
   )
 }
 
-// NO `fuze`-PREFIX CHECK HERE, AND THAT IS DELIBERATE. `fuzex` de-prefixes to
-// `x`, which is ONE character — below the contract's Slug minimum of three
-// (`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`). There is no conformant slug to move to,
-// so the prefix is load-bearing rather than a style violation. The shared kit
-// validator encodes exactly this exemption; copying a naive prefix check in here
-// would contradict it and fail the build for a rule FuzeX cannot satisfy. Run
-// the kit's validate-registration.mjs for the prefix rule itself.
+const SUBMITS_POLICY = /apps\/\$\{?SLUG\}?\/policy|apps\/\$SLUG\/policy/
 
-// Drift between registration/ and the chart's vendored copy. Helm's .Files cannot
-// read above the chart directory, so the copy under files/ is what actually
-// deploys — edit one, forget the other, and the cluster registers the stale one.
-function listFiles(dir) {
-  try {
-    return readdirSync(dir).filter(f => statSync(join(dir, f)).isFile()).sort()
-  } catch (err) {
-    problems.push(`cannot read ${dir}: ${err.message}`)
-    return []
+/**
+ * Returns the text a ConfigMap key actually ships, resolving BOTH shapes seen in
+ * the family: the content inlined as a literal block, or pulled in with
+ * `{{ .Files.Get "files/registration/x" }}` from a second copy inside the chart.
+ * Both are a duplicate of the file this repo edits, and both can drift from it —
+ * which is the failure being guarded against, so either has to be followed.
+ */
+function shippedContent(cmPath, cmText, key) {
+  const lines = cmText.split('\n')
+  const start = lines.findIndex(l =>
+    new RegExp(`^  ${key.replace('.', '\\.')}:\\s*\\|`).test(l)
+  )
+  if (start === -1) return null
+
+  const chartDir = cmPath.replace(/[/\\]templates[/\\][^/\\]+$/, '')
+  const body = []
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i]
+    const ref = l.match(/\{\{-?\s*\.Files\.Get\s+"([^"]+)"/)
+    if (ref) {
+      const p = join(chartDir, ref[1])
+      return existsSync(p)
+        ? { from: p, text: readFileSync(p, 'utf8') }
+        : { from: p, text: null }
+    }
+    if (l.trim() !== '' && !l.startsWith('    ')) break
+    body.push(l.replace(/^ {4}/, ''))
   }
+  return { from: `${cmPath} (inlined ${key})`, text: body.join('\n') }
 }
 
-const source = listFiles(SOURCE).filter(f => f !== 'README.md')
-const vendored = listFiles(VENDORED)
-
-for (const f of source) {
-  if (!vendored.includes(f)) {
-    problems.push(`registration/${f} has no vendored copy under deploy/helm/fuzex/files/registration/`)
+for (const [path, text] of configMaps) {
+  const shipped = shippedContent(path, text, 'policy.json')
+  if (!shipped) {
+    fail(
+      `${path} mounts no policy.json key — registration/policy.json is never mounted ` +
+        `into the init container, so it is never submitted to FuzeFront`
+    )
     continue
   }
-  if (!readFileSync(join(SOURCE, f)).equals(readFileSync(join(VENDORED, f)))) {
-    problems.push(`registration/${f} differs from the chart copy — the chart would deploy the stale one`)
+  if (shipped.text === null) {
+    fail(`${path} references ${shipped.from}, which does not exist`)
+  } else {
+    // Compare parsed JSON, not text: indentation and the block-scalar chomp
+    // indicator are formatting, the policy is what matters.
+    try {
+      if (JSON.stringify(JSON.parse(shipped.text)) !== JSON.stringify(policy)) {
+        fail(
+          `${shipped.from} has DRIFTED from ${POLICY_PATH}. That copy is what actually ` +
+            `deploys — re-sync it.`
+        )
+      }
+    } catch (err) {
+      fail(`${shipped.from}: not valid JSON — ${err.message}`)
+    }
   }
-}
-for (const f of vendored) {
-  if (!source.includes(f)) {
-    problems.push(`deploy/helm/fuzex/files/registration/${f} has no source in registration/ — it is unreachable and stale`)
+
+  const sh = shippedContent(path, text, 'register.sh')
+  if (!sh || !SUBMITS_POLICY.test(sh.text ?? '')) {
+    fail(
+      `${path}: the register.sh it ships never PUTs to /apps/{slug}/policy — the ` +
+        `policy is mounted but not submitted`
+    )
   }
 }
 
+// The repo's own copy of the script must agree; it is what a human reads and edits.
+if (existsSync('registration/register.sh')) {
+  const sh = readFileSync('registration/register.sh', 'utf8')
+  if (!SUBMITS_POLICY.test(sh)) {
+    fail('registration/register.sh never PUTs the policy to /apps/{slug}/policy')
+  }
+}
+
+// ── report ────────────────────────────────────────────────────────────────────
 if (problems.length) {
-  console.error('✘ FuzeX registration is incoherent:\n')
-  for (const p of problems) console.error(`  - ${p}`)
+  console.error(`✖ registration checks failed (${problems.length}):`)
+  for (const p of problems) console.error(`    - ${p}`)
   process.exit(1)
 }
-
 console.log(
-  `✔ FuzeX registration coherent — slug "${manifest.slug}", nav ${section}/${manifest.nav.order}, ${source.length} file(s) vendored in sync`
+  `✔ registration OK — ${policy.resources.length} resource(s), ${policy.roles.length} ` +
+    `role(s), shipped by ${configMaps.length} ConfigMap(s) and submitted by register.sh`
 )
