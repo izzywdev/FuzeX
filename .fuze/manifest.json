@@ -4,10 +4,6 @@
   "tier": "product",
   "expert": "fuzex-expert",
   "baselineRef": "v1",
-  "identity": {
-    "namespace": "fxdf",
-    "note": "Product-local entity-identifier namespace for design-frames-service's Postgres lifecycle tier (governance/identifier-standard.md). Types namespace as fxdf_<type>: fxdf_prj (project), fxdf_ftr (feature), fxdf_flw (flow), fxdf_frm (frame_ref), fxdf_apr (approval), fxdf_dsc (discussion), fxdf_cmt (comment). Declaring this block makes gate-identifier's --adoption check ENFORCING here. The identity package is NOT wired yet: minting is introduced by the backend-engineer implementation stream that lands after this frozen contract; the namespace is reserved now so the fxdf_* prefixes in openapi.yaml are recognized."
-  },
   "agents": [
     "fuzex-expert",
     "contract-designer",

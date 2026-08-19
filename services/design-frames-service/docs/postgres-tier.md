@@ -1,8 +1,12 @@
 # design-frames-service — Postgres lifecycle tier (design)
 
-Status: **FROZEN CONTRACT** (this doc + `../openapi.yaml` v0.2.0 + the `fxdf`
-identity namespace in `../../../.fuze/manifest.json`). Implementation has **not**
-started — see [Ownership & sequencing](#ownership--sequencing).
+Status: **FROZEN CONTRACT** (this doc + `../openapi.yaml` v0.2.0). This doc
+reserves the `fxdf` identifier namespace/prefixes; the formal
+`identity.namespace` declaration in `../../../.fuze/manifest.json` lands **with
+the identity package** in the implementation PR (see below — declaring it here
+would trip `gate-identifier --adoption`, which requires the package the repo
+does not yet depend on). Implementation has **not** started — see
+[Ownership & sequencing](#ownership--sequencing).
 
 This is the contract-designer artifact for evolving `design-frames-service` from
 a flat-file store (`lib/store.js`) to a **Postgres-backed lifecycle tier**. It
@@ -62,8 +66,9 @@ split is what makes it a later, isolated change.
 
 ## Entity & identifier model
 
-Entities use the **product-local `fxdf` identifier namespace** reserved in
-`.fuze/manifest.json` (`identity.namespace = "fxdf"`). Ids are **TypeIDs**:
+Entities use the **product-local `fxdf` identifier namespace** (declared in
+`.fuze/manifest.json` as `identity.namespace = "fxdf"` in the implementation PR,
+alongside the identity package). Ids are **TypeIDs**:
 `<prefix>_<base32 UUIDv7>`, opaque past the prefix, minted **only** by the owning
 service (never client-supplied) per `governance/identifier-standard.md` (the
 FuzeSDLC baseline standard). Every polymorphic reference carries its **type**.
@@ -109,10 +114,14 @@ discussion 1─N comment
    the existing bearer token (unchanged from v0.1.0). "The caller knew the id" is
    never authorization.
 
-The `fxdf_*` prefixes are recognized by `gate-identifier` only because
-`.fuze/manifest.json` now declares `identity.namespace`. The identity **package**
-(`mintId()`) is wired by the backend stream, not here — the namespace is reserved
-now so the contract's prefixes validate.
+The `identity.namespace` declaration in `.fuze/manifest.json` and the identity
+**package** (`mintId()`) land **together** in the backend implementation PR, not
+here: `gate-identifier --adoption` becomes enforcing the moment the namespace is
+declared and would reject a repo that ships create operations without depending
+on an identity package (`@izzywdev/fuzefront-identity`) — which this contract-only
+PR does not add. This doc reserves the `fxdf_*` prefixes; the contract's create
+bodies already satisfy the id-shape rules (no client `id`, `additionalProperties:
+false`, type-paired references) independent of the namespace declaration.
 
 ## Append-only approval log + stamp-binding invariant
 
