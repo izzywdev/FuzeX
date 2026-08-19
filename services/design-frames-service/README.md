@@ -90,9 +90,10 @@ service is the served surface that carries it.
   builder stage and copies `dist/` to `/app/webapp-dist`; `server.js` serves it at
   `/apps/fuzex/`. The design system `@izzywdev/fuzefront-design-system` is a **private**
   GitHub Packages package, so that install reads a `read:packages` token from a BuildKit
-  **secret mount** — never a build ARG, never a layer. **Open owner action:** the package
-  must grant `izzywdev/FuzeX` Actions read access, or the builder stage 401s and the CI
-  `docker-build` job fails. That is a package-settings change, not a code change.
+  **secret mount** — never a build ARG, never a layer. The grant is in place today (CI's
+  `docker-build` resolves the package and its smoke step fetches a real
+  `/apps/fuzex/remoteEntry.js`); if it is ever revoked the symptom is a 401 in the builder
+  stage — a package-settings problem, not a code bug.
 
 > **Corrected 2026-08-19.** Earlier docs in this repo (`.fuze/manifest.json`,
 > `docs/EXTRACTION.md`, `skills/design-frames-lifecycle/SKILL.md`, the root `README.md`)

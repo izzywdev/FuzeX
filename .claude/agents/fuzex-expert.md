@@ -58,9 +58,10 @@ The repo is **public, MIT-licensed (`oss-public`)** and **product-tier**.
   (`ENV DESIGN_FRAMES_WEBAPP_DIR`), which is what `server.js` serves at `/apps/fuzex/`. Its design
   system, `@izzywdev/fuzefront-design-system`, is a **private GitHub Packages** package, so that
   `npm install` needs a `read:packages` token — supplied as a BuildKit **secret mount**
-  (`--mount=type=secret,id=github_token`), never a build ARG and never a layer. **Open owner
-  action:** the package must grant `izzywdev/FuzeX` Actions read access, or the builder stage 401s
-  and `docker-build` fails. That is a package-settings change, not a code change.
+  (`--mount=type=secret,id=github_token`), never a build ARG and never a layer. The package does
+  grant `izzywdev/FuzeX` Actions read access today: `docker-build` resolves it and the smoke step
+  fetches a real `/apps/fuzex/remoteEntry.js`. If that grant is ever revoked, the failure is a 401
+  in the builder stage — a package-settings problem wearing a build error's clothes, not a code bug.
 - **Toolchain floor (minimums, never lower them):** Node `>=24.0.0`, npm `>=10.0.0`, `.nvmrc` = `24`,
   Docker base `node:24-alpine`, CI `node-version: '24.x'`, React/react-dom `^19.2.0`,
   `@types/node ^24.13.3`, `@types/react ^19.2.0`, MF shared `requiredVersion: ^19.0.0`.

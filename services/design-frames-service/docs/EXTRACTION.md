@@ -122,10 +122,11 @@ gone anywhere and is still sandboxed with localhost-only network access. It is n
 surface of the product rather than the whole of it** — which is exactly why the old note
 read as a statement about FuzeX-the-repo when it was only ever true of FuzeX-the-plugin.
 
-What is still genuinely outstanding is recorded honestly: the remote's design system
-(`@izzywdev/fuzefront-design-system`) is a **private** GitHub Packages package. The image
-builds the bundle in a `node:24-alpine` builder stage using a BuildKit **secret mount** for a
-`read:packages` token, so the token never reaches a layer — but the package itself must grant
-`izzywdev/FuzeX` Actions read access, or that install 401s and `docker-build` fails. That is a
-package-settings action for the owner, not a code change, and it is the one thing standing
-between this PR's CI and the portal tile actually mounting.
+One dependency worth writing down, because its failure mode does not look like itself: the
+remote's design system (`@izzywdev/fuzefront-design-system`) is a **private** GitHub Packages
+package. The image builds the bundle in a `node:24-alpine` builder stage using a BuildKit
+**secret mount** for a `read:packages` token, so the token never reaches a layer — but the
+build depends on that package granting `izzywdev/FuzeX` Actions read access. It does today
+(CI's `docker-build` resolves it and serves a real `/apps/fuzex/remoteEntry.js`). If the grant
+is revoked, the builder stage 401s and the whole image build fails — a package-settings
+problem presenting as a broken Dockerfile.
