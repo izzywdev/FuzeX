@@ -24,8 +24,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
+      # deploy-on-push repos are NEVER bot-merged (.fuze schema:
+      # "If true, never bot-merge; merge in a deploy window"). Read the flag and
+      # gate the enable step on it, so the manifest declaration is ENFORCED here
+      # rather than only honored by governance-nightly — a manifest value nothing
+      # on the merge path reads is a declaration, not a control.
+      - name: Read deploy-on-push flag
+        id: hardening
+        run: |
+          DOP=$(python3 -c "import json;print(str(json.load(open('.fuze/manifest.json')).get('hardening',{}).get('deployOnPush', False)).lower())" 2>/dev/null || echo false)
+          echo "deploy_on_push=$DOP" >> "$GITHUB_OUTPUT"
+          echo "::notice::hardening.deployOnPush=$DOP"
+
+      - name: Skip notice (deploy-on-push)
+        if: steps.hardening.outputs.deploy_on_push == 'true'
+        run: echo "::notice::deployOnPush=true — auto-merge is disabled for this repo; merge manually in a deploy window."
+
       - name: Enable auto-merge
-        if: github.event.pull_request.user.login == github.repository_owner || contains(github.event.pull_request.labels.*.name, 'auto-merge')
+        if: steps.hardening.outputs.deploy_on_push != 'true' && (github.event.pull_request.user.login == github.repository_owner || contains(github.event.pull_request.labels.*.name, 'auto-merge'))
         run: |
           gh pr merge ${{ github.event.pull_request.number }} --auto --squash --delete-branch
         env:
