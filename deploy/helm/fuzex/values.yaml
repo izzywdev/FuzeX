@@ -76,3 +76,33 @@ registration:
 resources:
   requests: { cpu: 25m, memory: 64Mi }
   limits: { cpu: 500m, memory: 512Mi }
+
+# -- Module-Federation remote (webapp/'s built dist/), served at /apps/fuzex/.
+# Empty = trust the image's own ENV DESIGN_FRAMES_WEBAPP_DIR (set in the
+# Dockerfile to /app/webapp-dist, where the builder stage's COPY --from
+# lands it). Only set this if a deployment needs to point at a path the
+# image itself didn't bake the assets into — there is no such case today.
+webapp:
+  dir: ""
+
+# -- federatedMount: the SAME-ORIGIN portal mount for the Module-Federation
+# remote. This is a DIFFERENT surface from `ingress` above (a public origin for
+# the mobile/standalone case): it exposes the remote under the FuzeFront HOST
+# origin at /apps/fuzex/ so the portal shell imports remoteEntry.js same-origin
+# — no iframe, no CORS, no mixed-content, sharing the host's React singleton.
+#
+# It MUST live in THIS chart, not FuzeFront's: a k8s Ingress can only reference a
+# Service in its own namespace, and design-frames-service runs in the `fuzex`
+# namespace (separate Argo Application). The cluster-wide Traefik routes it, so
+# no FuzeInfra change is needed. PASS-THROUGH: the service already serves assets
+# under /apps/fuzex/, so there is deliberately NO strip-prefix middleware.
+#
+# Disabled + hostless by default: needs the FuzeFront host (app.fuzefront.com)
+# and the remote image to exist first. `host` is `required` when enabled so a
+# hostless Ingress can never match every request and hijack the controller.
+federatedMount:
+  enabled: false
+  className: traefik
+  host: ""
+  annotations: {}
+  path: /apps/fuzex

@@ -1,0 +1,46 @@
+{{- if and .Values.enabled .Values.federatedMount.enabled }}
+{{/*
+Same-origin portal mount for the design-frames Module-Federation remote.
+
+Routes {host}/apps/fuzex/* (e.g. /apps/fuzex/remoteEntry.js) to this service so
+the FuzeFront portal shell imports the remote SAME-ORIGIN — no iframe, no CORS,
+no mixed-content — and it mounts sharing the host's React 19 singleton.
+
+Lives in FuzeX's chart, not FuzeFront's: an Ingress can only target a Service in
+its own namespace, and this service runs in `fuzex` (separate Argo Application).
+The cluster-wide Traefik controller routes it; no FuzeInfra change is needed.
+
+PASS-THROUGH, not rewrite: server.js already serves the built webapp under the
+/apps/fuzex/ prefix (webapp/vite.config.ts `base: '/apps/fuzex/'`), so Traefik
+forwards the path verbatim — deliberately NO strip-prefix middleware.
+
+Disabled + hostless by default. `host` is `required` when enabled so a hostless
+Ingress can never match every request that reaches the controller.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "fuzex.fullname" . }}-federated-mount
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+  {{- with .Values.federatedMount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.federatedMount.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "federatedMount.host is required when federatedMount.enabled is true" .Values.federatedMount.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.federatedMount.path | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "fuzex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
