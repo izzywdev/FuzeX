@@ -859,7 +859,7 @@ components:
       properties:
         id: { $ref: '#/components/schemas/CommentId' }
         discussionId: { $ref: '#/components/schemas/DiscussionId' }
-        parentId:
+        parentCommentId:
           allOf: [ { $ref: '#/components/schemas/CommentId' } ]
           nullable: true
           description: 'Nullable self-reference for threading; null = top-level.'
@@ -878,7 +878,7 @@ components:
       description: 'Create body. No `id` — server mints fxdf_cmt_* (identifier-standard §1).'
       properties:
         body: { type: string, minLength: 1 }
-        parentId:
+        parentCommentId:
           allOf: [ { $ref: '#/components/schemas/CommentId' } ]
           nullable: true
           description: 'Optional parent comment to thread under (must belong to the same discussion).'
