@@ -1,8 +1,8 @@
 {
   "manifestVersion": "1",
   "slug": "fuzex",
-  "name": "FuzeX",
-  "menuLabel": "FuzeX",
+  "name": "X",
+  "menuLabel": "X",
   "description": "Design-phase workspace: navigable HTML frames, per-flow approval bound to a content stamp, and the contract seam between a design and its implementation.",
   "icon": {
     "kind": "emoji",

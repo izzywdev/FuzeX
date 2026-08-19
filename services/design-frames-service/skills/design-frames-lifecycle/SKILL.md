@@ -78,8 +78,14 @@ as the step that comes *after* local approval, not a replacement for local autho
 
 ## Non-goals
 
-- Not a Module-Federation embed — this is an API integration; the consuming repo's shell
-  is unaffected.
+- Not a Module-Federation embed **for the consuming repo** — this skill is an API
+  integration and your shell is unaffected by it. (Corrected 2026-08-19: this bullet used
+  to say flatly "not a Module-Federation embed", which stopped being true once FuzeX
+  became a served product. FuzeX *does* now ship its own MF remote — scope `fuzex`, module
+  `./DesignFramesApp`, served at `/apps/fuzex/remoteEntry.js` — but that remote is how the
+  **FuzeFront host shell** mounts FuzeX's own review UI as a portal tile. It is not
+  something a repo syncing frames through this skill has to host, share React with, or
+  even know about.)
 - Not the source of truth for frame *content* — that's always the consuming repo's own
   `design/frames/<feature>/**` (or equivalent).
 - Not Authentik/Permit-authenticated yet — writes use a static bearer token

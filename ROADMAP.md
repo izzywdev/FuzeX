@@ -2,7 +2,15 @@
 
 **Building the future of AI-driven design tools**
 
-This roadmap outlines our journey to create the most comprehensive AI-powered Figma plugin for designers and developers.
+This roadmap outlines our journey to create the most comprehensive AI-powered design tooling for
+designers and developers.
+
+> **Scope note (2026-08-19).** This line used to read "…the most comprehensive AI-powered Figma
+> **plugin**". FuzeX has since grown past that: it is a SaaS product for UX/UI management with a
+> **served** surface (`services/design-frames-service` — deployed, registered with the FuzeFront
+> portal under slug `fuzex`) alongside the Figma plugin. The phases below still track the plugin's
+> feature work; the served product's roadmap lives with the service
+> ([`services/design-frames-service/README.md`](services/design-frames-service/README.md)).
 
 ## 🎯 Vision
 

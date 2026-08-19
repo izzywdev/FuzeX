@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24.x'
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Test
@@ -62,6 +62,15 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:4400/health
+          # The two endpoints the platform probes, checked against a REAL running
+          # image rather than the source tree, and both answered before any auth.
+          # `head -1 | grep '^openapi: 3.'` is the assertion that matters: a bare
+          # status check passes when a static-file fallback answers /openapi with
+          # the landing page HTML at 200.
+          curl -sf http://127.0.0.1:4400/openapi | head -1 | grep -q '^openapi: 3\.'
+          curl -sf http://127.0.0.1:4400/openapi.yaml >/dev/null
+          # The same-origin landing page.
+          curl -sf http://127.0.0.1:4400/ | grep -qi '<html'
           # webapp/'s build actually landed in the image and is served at
           # /apps/fuzex/ — catches the builder stage silently producing an
           # empty dist/ or the runtime stage COPY --from path being wrong.

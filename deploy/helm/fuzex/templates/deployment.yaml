@@ -38,12 +38,10 @@ spec:
       labels:
         {{- include "fuzex.selectorLabels" . | nindent 8 }}
       annotations:
-        {{- if .Values.registration.enabled }}
         # Editing registration/manifest.json must redeploy this pod, not wait for
         # an unrelated restart — otherwise a corrected manifest sits in git looking
         # applied while the registry still holds the old one.
         checksum/registration: {{ (.Files.Glob "files/registration/*").AsConfig | sha256sum }}
-        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -54,12 +52,22 @@ spec:
         # by it; fsGroup is what makes a freshly-provisioned PV group-writable.
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
-      {{- if .Values.registration.enabled }}
       # SELF-REGISTRATION WITH FUZEFRONT — what puts FuzeX in the portal menu.
       #
       # Fail-closed on purpose: register.sh exits non-zero on anything unexpected,
       # so a registration failure CrashLoopBackOffs this pod with the reason in its
       # log. An app that starts unregistered is up, serving, and subtly broken.
+      #
+      # UNCONDITIONAL, AND THAT IS THE POINT. This block, its ConfigMap and its
+      # volume used to sit behind an `if .Values.registration.enabled` guard, with
+      # the switch declared in values.yaml. A fail-closed step behind a values
+      # switch is not fail-closed — it is fail-closed until somebody sets the
+      # switch to false, which is exactly what a person reaches for when the pod
+      # will not start and the registry is the thing complaining. The result is a
+      # pod that serves traffic while being invisible to the portal: precisely the
+      # failure this container exists to prevent, one `--set` away, looking like a
+      # green deploy. There is deliberately no knob. Matches FuzeKeys#76 and
+      # FuzeAgent#157.
       initContainers:
         - name: fuzefront-register
           image: {{ .Values.registration.image | quote }}
@@ -98,7 +106,6 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-      {{- end }}
       containers:
         - name: design-frames-service
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -161,7 +168,6 @@ spec:
           # persistence.enabled MUST be true anywhere the records matter.
           emptyDir: {}
           {{- end }}
-        {{- if .Values.registration.enabled }}
         - name: registration
           configMap:
             name: {{ .Values.registration.configMapName | quote }}
@@ -169,5 +175,4 @@ spec:
             # literal `0555` would be read as decimal 555. register.sh is exec'd,
             # so it must carry the execute bit.
             defaultMode: 365
-        {{- end }}
 {{- end }}

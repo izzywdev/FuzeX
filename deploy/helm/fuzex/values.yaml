@@ -44,9 +44,12 @@ apiTokens:
   existingSecret: fuzex-api-tokens
   secretKey: DESIGN_FRAMES_API_TOKENS
 
-# -- ingress: the public origin registration/manifest.json points integration.url
-# at. Disabled and hostless — the name needs DNS + the Cloudflare tunnel, which
-# are FuzeInfra's to provide. Enabling without a host fails the render on purpose.
+# -- ingress: the public origin that serves the API, the landing page AND the
+# Module-Federation remote registration/manifest.json points integration.remoteEntry
+# at (/apps/fuzex/remoteEntry.js — a PATH, resolved against whichever origin loads
+# it, which is why nothing here hard-codes an API host).
+# Disabled and hostless — the name needs DNS + the Cloudflare tunnel, which are
+# FuzeInfra's to provide. Enabling without a host fails the render on purpose.
 ingress:
   enabled: false
   className: ""
@@ -57,8 +60,14 @@ ingress:
 # container. The payload is this repo's registration/ directory, vendored into
 # files/registration/ because Helm's .Files cannot read above the chart dir;
 # scripts/check-registration.mjs fails CI if the two copies diverge.
+# There is deliberately NO `registration.enabled` here. It used to exist, and the
+# init container and its ConfigMap were rendered behind it. A switch that turns off
+# a fail-closed registration step is the one thing that makes it not fail-closed:
+# when the pod will not start and the registry is what is complaining, flipping that
+# switch is the obvious "fix", and it produces a pod that serves traffic while being
+# invisible to the portal — the exact failure the init container exists to prevent.
+# Matches FuzeKeys#76 and FuzeAgent#157, where the init container is unconditional.
 registration:
-  enabled: true
   # alpine, not a bespoke image: register.sh needs only sh + curl + jq, which the
   # init container installs. Nothing product-specific is required, so there is no
   # image here to drift against FuzeX's own build.

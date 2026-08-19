@@ -27,6 +27,22 @@ paths:
                   status: { type: string, example: healthy }
                   timestamp: { type: integer }
 
+  /openapi:
+    get:
+      summary: This contract, served by the thing that implements it
+      description: >-
+        Returns the OpenAPI document as YAML. `/openapi.yaml` and `/openapi.json`
+        are accepted spellings of the same route and return identical bytes under
+        the same YAML content type — every OpenAPI parser reads YAML, and no
+        consumer is handed something that claims to be JSON and is not. Served
+        before any auth, like `/health`.
+      security: []
+      responses:
+        '200':
+          description: The OpenAPI document
+          content:
+            application/yaml: {}
+
   /api/v1/features:
     get:
       summary: List features
