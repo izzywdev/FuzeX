@@ -24,7 +24,7 @@
   "hardening": {
     "ruleset": true,
     "requireSignatures": true,
-    "deployOnPush": false
+    "deployOnPush": true
   },
   "providesTo": [
     "FuzeFront"
