@@ -1,4 +1,4 @@
-{{- if .Values.registration.enabled }}
+{{- if .Values.enabled }}
 {{/*
 The registration payload the init container mounts, carried INLINE from this
 repo's registration/ directory via .Files.Get.

@@ -247,7 +247,21 @@ async function handleRequest(req, res) {
     // Read per request rather than cached at startup: the file is a few KB, this
     // is not a hot path, and a cached copy would go stale against a mounted spec
     // with no signal that it had.
-    if (req.method === 'GET' && (url.pathname === '/openapi.yaml' || url.pathname === '/openapi.json')) {
+    //
+    // Three spellings, one document. `/openapi` (bare) is what a portal or a
+    // service catalogue probes when it does not know — and should not have to
+    // know — which serialisation this service happens to store its contract in.
+    // Worth stating what a 200 here does NOT prove: behind a static-file
+    // fallback (`try_files … /index.html`, an SPA catch-all) an unknown path
+    // answers 200 with the LANDING PAGE, so a probe that only checks the status
+    // code passes while the "spec" it fetched is HTML. tests/server.test.cjs
+    // asserts against that shape, not just against the code.
+    if (
+      req.method === 'GET' &&
+      (url.pathname === '/openapi' ||
+        url.pathname === '/openapi.yaml' ||
+        url.pathname === '/openapi.json')
+    ) {
       const spec = await fs.readFile(path.join(__dirname, 'openapi.yaml'), 'utf8');
       // The source of truth is YAML. `/openapi.json` is accepted because tooling
       // asks for it by convention, and answers with the SAME bytes under the YAML

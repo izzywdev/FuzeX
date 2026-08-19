@@ -48,8 +48,17 @@ export default defineConfig({
         },
       }
     : undefined,
-  // Served under /apps/fuzex/ in prod (remoteEntry at /apps/fuzex/remoteEntry.js),
-  // matching the app-registry manifest the orchestrator writes.
+  // Served under /apps/fuzex/ in prod (remoteEntry at /apps/fuzex/remoteEntry.js) by
+  // design-frames-service ITSELF — see server.js's WEBAPP_MOUNT. Same origin as the
+  // API on purpose, which is what lets api.ts keep an empty base and work unchanged
+  // behind local TLS and behind the prod ingress.
+  //
+  // This must stay in lockstep with THREE things that all name the same URL:
+  // server.js's WEBAPP_MOUNT, and registration/manifest.json's
+  // integration.remoteEntry. That manifest is written and pushed by this repo (from
+  // the fail-closed init container in deploy/helm/fuzex) — an earlier version of this
+  // comment said an orchestrator wrote it, which was true when FuzeX did not deploy
+  // anything of its own and is not true now.
   base: '/apps/fuzex/',
   build: {
     target: 'esnext',

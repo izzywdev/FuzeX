@@ -197,6 +197,29 @@ async function main() {
     assert.strictEqual(res.status, 404);
   });
 
+  await test('GET /openapi (bare) serves the contract, and is not the landing page', async () => {
+    // The spelling a portal or a service catalogue probes when it does not know
+    // which serialisation this service stores its contract in.
+    const [bare, yaml] = await Promise.all([
+      request(port, { method: 'GET', path: '/openapi' }),
+      request(port, { method: 'GET', path: '/openapi.yaml' }),
+    ]);
+    assert.strictEqual(bare.status, 200);
+    assert.strictEqual(bare.raw, yaml.raw, '/openapi and /openapi.yaml disagree');
+    assert.match(bare.raw, /^openapi: 3\./m, 'body is not the OpenAPI document');
+
+    // A 200 IS NOT EVIDENCE THE ROUTE EXISTS. The classic way this breaks is a
+    // static-file fallback (nginx `try_files … /index.html`, an SPA catch-all)
+    // answering an unknown path with the LANDING PAGE at 200 — a green probe
+    // serving HTML as the contract. Assert against that shape directly, so the
+    // test still fails if the route is ever removed and something else answers.
+    assert.doesNotMatch(bare.headers['content-type'] || '', /text\/html/,
+      '/openapi answered with HTML — it fell through to a static-file handler');
+    assert.doesNotMatch(bare.raw, /<html/i, '/openapi served a web page, not the spec');
+    const landing = await request(port, { method: 'GET', path: '/' });
+    assert.notStrictEqual(bare.raw, landing.raw, '/openapi served the landing page');
+  });
+
   await test('GET /apps/fuzex/remoteEntry.js serves the built MF remote, unauthenticated', async () => {
     const res = await request(port, { method: 'GET', path: '/apps/fuzex/remoteEntry.js' });
     assert.strictEqual(res.status, 200);

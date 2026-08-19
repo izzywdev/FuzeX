@@ -23,13 +23,15 @@ RUN --mount=type=secret,id=github_token \
 COPY webapp/ ./
 RUN npm run build
 
-# Runtime stays on node:20-alpine (unchanged): the service's own package.json
-# declares `engines.node: >=18.0.0` and the rest of this repo's CI still runs
-# on the Node 20 line (see ci.yml, design-frames-service-ci.yml) — server.js
-# itself needs no Node 24 feature, only the webapp build tooling does, and
-# that's isolated to the builder stage above. Bumping the runtime line is a
-# separate, repo-wide toolchain decision, not bundled into this change.
-FROM node:20-alpine
+# Runtime is node:24-alpine, matching the builder. The comment here used to
+# justify staying on node:20 because the service declared `engines.node >=18`
+# and this repo's CI ran the Node 20 line — both of those premises are gone:
+# services/design-frames-service/package.json now declares `>=24.0.0`, .nvmrc is
+# 24, and .fuze/manifest.json's `toolchain` block names `node:24-alpine` as the
+# family's Docker base. An image running below its own manifest's `engines` floor
+# is a disagreement nothing checks, so it is settled here rather than left as a
+# "separate decision" that never gets made.
+FROM node:24-alpine
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund || true

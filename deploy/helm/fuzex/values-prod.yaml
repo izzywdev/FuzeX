@@ -26,8 +26,9 @@
 #      one.
 #   4. have FuzeInfra provide the DNS/tunnel for fuzex.prod.fuzefront.com, then
 #      set ingress.enabled + ingress.host here. registration/manifest.json already
-#      points integration.url at that name, so registering before it resolves
-#      would activate a portal tile that mounts a dead origin.
+#      points integration.remoteEntry at /apps/fuzex/remoteEntry.js on that origin,
+#      so registering before it resolves would activate a portal tile that mounts a
+#      dead origin.
 #   5. flip `enabled: true`, in ONE PR, during a deploy window.
 # =============================================================================
 enabled: false

@@ -1,8 +1,10 @@
 # Extraction record: FuzeFront's navigable-frames pipeline → FuzeX
 
-**Date:** 2026-08-10. **Corrected:** 2026-08-11 — see *Correction* below; this record's
-original "Why"/"What's different" sections described the wrong split and are kept here
-struck through for history, with the corrected model following.
+**Date:** 2026-08-10. **Corrected:** 2026-08-11 (*Correction*) and 2026-08-19
+(*Correction 2*) — see both below. This record's original "Why"/"What's different"
+sections described the wrong split, and its "explicitly deferred" list described a FuzeX
+that no longer exists; both are kept here struck through for history, with the corrected
+model following.
 
 **Origin PR (FuzeFront):** see `docs/planning/design-first-ui-pipeline.md` in
 that repo for the pipeline this was ported from.
@@ -79,14 +81,51 @@ FuzeFront-side PR). This service reimplements the same mechanisms:
   migrated, and never will be — see the Correction above.** They stay authored in
   FuzeFront's repo permanently; syncing them here (optional, via
   `design-frames-lifecycle`) is additive, not a move.
-- **No Module-Federation embed.** FuzeFront consumes this service over its
-  REST API from CI (plumbing-only integration); the frontend here is not
-  mounted inside the FuzeFront shell. FuzeX currently has zero frontend build
-  tooling (see `.fuze/manifest.json`'s `portal.registers: false` and its
-  reasoning) — embedding would be new scope, not extraction.
+- ~~**No Module-Federation embed.**~~ **SUPERSEDED (2026-08-19) — see
+  *Correction 2* below.** This bullet said FuzeFront consumed the service over its
+  REST API only, that the frontend here was not mounted inside the FuzeFront shell,
+  and that FuzeX had zero frontend build tooling and a `portal.registers: false` in
+  `.fuze/manifest.json`. None of that is true any more.
 - **No Authentik/Permit integration.** Auth is a static bearer token for now.
   Family-standard auth would mean wiring this service onto FuzeInfra, which
   is out of scope for a same-session change (FuzeInfra changes are delegated
   via `@claude`, never made directly — see this repo's `CLAUDE.md`).
 - **No persisted datastore beyond the filesystem.** See README.md's Data
   model section for the reasoning.
+
+
+## Correction 2 (2026-08-19): FuzeX is a served product, and it registers itself
+
+The deferral above, and the `.fuze/manifest.json` note it cited, both described FuzeX
+as a **local, static frame-approval tool wrapped in a Figma plugin**: UI in Figma's
+plugin sandbox, `networkAccess` pinned to localhost, therefore no served origin to
+iframe, no `remoteEntry` to federate, and no registration of its own — whatever portal
+presence it had was said to be arranged for it by an orchestrator.
+
+That was an accurate description of FuzeX **when it was written**. It is not a
+description of FuzeX now, and the old text is struck through rather than deleted so the
+next reader sees an evolution instead of a contradiction. FuzeX has scaled up into a
+**full SaaS product for UX/UI management**, and it is onboarded like every other product
+in the family:
+
+| Then | Now |
+|---|---|
+| No served origin | `services/design-frames-service` serves the API, its own landing page, and the remote bundle on one real origin |
+| No health/contract endpoints on a served origin | `GET /health` and `GET /openapi` (aliases `/openapi.yaml`, `/openapi.json`), both answered **before** any auth |
+| No `remoteEntry` to federate | Module-Federation remote `services/design-frames-service/webapp` — scope `fuzex`, module `./DesignFramesApp`, served same-origin at `/apps/fuzex/remoteEntry.js`, `react`/`react-dom` shared as singletons at `requiredVersion: ^19.0.0` (identical to the host's; a different range silently loads a second React and dies on "Invalid hook call" in the browser) |
+| `portal.registers: false` | `portal.registers: true`, with a **fail-closed** registration init container on the pod (`deploy/helm/fuzex/templates/deployment.yaml`) |
+| "registration handled by the orchestrator" | `registration/manifest.json` + `registration/policy.json` (slug `fuzex`, display name `X`) live **in this repo**, are rendered into a ConfigMap by **this** chart, and are pushed by **this** pod |
+| No deployment path | `deploy/helm/fuzex` (chart) + `deploy/argocd/application.yaml` (Argo CD Application) |
+
+The Figma/FigJam plugin at the repo root (`manifest.json`, `code.js`, `ui.html`) has not
+gone anywhere and is still sandboxed with localhost-only network access. It is now **one
+surface of the product rather than the whole of it** — which is exactly why the old note
+read as a statement about FuzeX-the-repo when it was only ever true of FuzeX-the-plugin.
+
+What is still genuinely outstanding is recorded honestly: the remote's design system
+(`@izzywdev/fuzefront-design-system`) is a **private** GitHub Packages package. The image
+builds the bundle in a `node:24-alpine` builder stage using a BuildKit **secret mount** for a
+`read:packages` token, so the token never reaches a layer — but the package itself must grant
+`izzywdev/FuzeX` Actions read access, or that install 401s and `docker-build` fails. That is a
+package-settings action for the owner, not a code change, and it is the one thing standing
+between this PR's CI and the portal tile actually mounting.
