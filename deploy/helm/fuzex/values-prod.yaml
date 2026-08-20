@@ -2,38 +2,37 @@
 # FuzeX — production overlay (Contabo k3s, via Argo CD)
 # =============================================================================
 # The image tag below is bumped by .github/workflows/release.yml; Argo detects
-# the diff and rolls it. DO NOT edit it by hand.
+# the diff and rolls it. DO NOT edit it by hand — a release PR does that (see
+# the "Bump the image tag" step there).
 #
-# `enabled` stays FALSE, and that is the honest state rather than an omission.
-# Two things are not true yet:
-#
-#   1. ghcr.io/izzywdev/fuzex-design-frames-service has never been published.
-#      release.yml (added alongside this chart) is what will publish it; until a
-#      push to master runs it, this tag names an image that does not exist and
-#      the pod would ImagePullBackOff.
-#   2. `fuzefront-registration` does not exist as a SealedSecret in the fuzex
-#      namespace. The registration init container is fail-closed by design, so
-#      without it the pod will not start.
-#
-# TO GO LIVE, in this order:
-#   1. merge a change under services/design-frames-service/ to master — release.yml
-#      builds and pushes the image and bumps the tag below.
-#   2. seal `fuzefront-registration` (key `token`, an apps:register bearer) into
-#      the fuzex namespace. The fuzex-registration ConfigMap is NOT a manual step
-#      — the chart renders it from files/registration/.
-#   3. seal `fuzex-api-tokens` (key DESIGN_FRAMES_API_TOKENS) too, or the service
-#      comes up read-only: every write 401s. That is a safe state, not a working
-#      one.
-#   4. have FuzeInfra provide the DNS/tunnel for fuzex.prod.fuzefront.com, then
-#      set ingress.enabled + ingress.host here. registration/manifest.json already
-#      points integration.url at that name, so registering before it resolves
-#      would activate a portal tile that mounts a dead origin.
-#   5. flip `enabled: true`, in ONE PR, during a deploy window.
+# GO-LIVE STATE, verified 2026-08-20, not assumed:
+#   1. ghcr.io/izzywdev/fuzex-design-frames-service IS published (anonymous
+#      GHCR pull confirmed; tags observed: e78f0bf939b6, c709be779e1c,
+#      dad95d6ee5ca, dadc6955766e, latest — "0.1.0" was NEVER a real tag, it
+#      was this file's placeholder default from before release.yml's bump
+#      step could ever complete). Pinned below to dadc6955766e, the newest
+#      build (matches current master's HEAD short-sha) — every release from
+#      here forward is bumped automatically by the fixed release.yml PR flow.
+#   2. `fuzefront-registration` IS sealed into the fuzex namespace
+#      (deploy/argocd/sealed/fuzefront-registration.yaml, fingerprint
+#      2ad2dff4d1564d63). The registration init container is fail-closed by
+#      design, so without it the pod would not start — it now can.
+#   3. `fuzex-api-tokens` (key DESIGN_FRAMES_API_TOKENS) does NOT yet exist as
+#      a SealedSecret. apiTokens.existingSecret is `optional: true` in the pod
+#      spec, so its absence is a SAFE degraded state (every write 401s), not a
+#      blocker to going live read/registration-wise. Sealing a real token is a
+#      separate follow-up once one is minted — this repo has no token value to
+#      seal today, and fabricating one would not be a real credential.
+#   4. fuzex.prod.fuzefront.com DNS resolves (verified 2026-08-20 — AAAA via
+#      Cloudflare). ingress.enabled + host are flipped on below.
+#   5. `enabled: true` below is the go-live switch itself, landing in the SAME
+#      PR as 1/2/4 above, during a deploy window (this repo is
+#      hardening.deployOnPush: true — never bot-merged).
 # =============================================================================
-enabled: false
+enabled: true
 
 image:
-  tag: "0.1.0"
+  tag: "dadc6955766e"
   pullPolicy: Always
 
 imagePullSecrets:
@@ -44,6 +43,6 @@ persistence:
   size: 5Gi
 
 ingress:
-  enabled: false
+  enabled: true
   className: traefik
-  host: ""
+  host: "fuzex.prod.fuzefront.com"
