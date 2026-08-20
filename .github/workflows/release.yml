@@ -146,6 +146,27 @@ jobs:
         with:
           ref: master
 
+      - name: Require the release credential
+        # Hard-fail if GH_RELEASE_PAT is absent or expired so that FuzeFront's
+        # fleet-pat-health.yml nightly check can detect the failure at this named
+        # step within 24 h and open an alert issue, rather than letting prod stay
+        # pinned to a stale image tag with no notification.
+        env:
+          GH_RELEASE_PAT: ${{ secrets.GH_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_RELEASE_PAT:-}" ]; then
+            echo "::error::GH_RELEASE_PAT secret is not set in this repo."
+            echo "  Add it: Settings -> Secrets and variables -> Actions -> New repository secret"
+            echo "  Name: GH_RELEASE_PAT  Value: a classic PAT with repo scope"
+            exit 1
+          fi
+          LOGIN=$(GH_TOKEN="${GH_RELEASE_PAT}" gh api user --jq '.login' 2>&1) || {
+            echo "::error::GH_RELEASE_PAT is invalid or expired. Mint a new token and update the secret."
+            exit 1
+          }
+          echo "Credential verified (user: ${LOGIN})"
+
       # Resolve which credential commits the bump. GH_RELEASE_PAT is preferred
       # when present; otherwise the built-in GITHUB_TOKEN is used.
       #
