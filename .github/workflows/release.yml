@@ -137,25 +137,47 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # `write` so this job can commit the tag bump with the built-in
+      # GITHUB_TOKEN when no GH_RELEASE_PAT is configured. See "Resolve the
+      # release credential" below.
+      contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: master
 
-      # FAIL LOUDLY rather than skipping. A release that publishes an image and
-      # leaves values-prod.yaml pinned to the previous tag looks green and ships
-      # nothing. If this step is the only red one, the image IS published and only
-      # the prod pin is missing.
-      - name: Require the release credential
+      # Resolve which credential commits the bump. GH_RELEASE_PAT is preferred
+      # when present; otherwise the built-in GITHUB_TOKEN is used.
+      #
+      # WHY A FALLBACK. This job used to hard-fail when GH_RELEASE_PAT was unset,
+      # and it WAS unset here — every release since this workflow landed built and
+      # pushed its image and then died before bumping the tag, so prod stayed
+      # pinned to a tag that names an image nobody deploys (FuzeSDLC#131). The
+      # loud failure was correct in principle and still left the repo broken in
+      # practice, because the remedy needed a human with admin to mint a secret.
+      #
+      # The bump is a same-repo write to `contents`, which GITHUB_TOKEN can do
+      # given `permissions: contents: write` above, and it goes through the
+      # contents API, so the resulting commit is server-side signed and satisfies
+      # `required_signatures` exactly as the PAT's did.
+      #
+      # The PAT's one distinguishing property is that its pushes START WORKFLOWS.
+      # This workflow treats that as a HAZARD, not a feature — see the `paths:`
+      # block above, which deliberately omits `deploy/**` so a release cannot
+      # re-trigger itself. GITHUB_TOKEN pushes do not start workflows at all, so
+      # the fallback removes that footgun rather than adding one.
+      - name: Resolve the release credential
         env:
           PAT: ${{ secrets.GH_RELEASE_PAT }}
         run: |
-          if [ -z "${PAT}" ]; then
-            echo "::error::GH_RELEASE_PAT is not set on this repository, so the prod tag cannot be bumped."
-            echo "::error::The image for ${{ needs.build-push.outputs.image_tag }} was built and pushed, but values-prod.yaml still pins the OLD tag."
-            echo "::error::Add a classic PAT with 'repo' scope as GH_RELEASE_PAT (the same secret FuzePlan uses), then re-run this workflow."
-            exit 1
+          set -euo pipefail
+          if [ -n "${PAT}" ]; then
+            echo "release credential: GH_RELEASE_PAT"
+            echo "RELEASE_CRED=pat" >> "$GITHUB_ENV"
+          else
+            echo "::notice::GH_RELEASE_PAT is not set — committing the tag bump with the built-in GITHUB_TOKEN."
+            echo "::notice::If this step's commit fails with 403, this repository's Settings → Actions → Workflow permissions is set to read-only, which caps the job-level 'contents: write' requested above. Either flip that setting or add GH_RELEASE_PAT."
+            echo "RELEASE_CRED=github_token" >> "$GITHUB_ENV"
           fi
 
       - name: Bump the image tag in values-prod.yaml
@@ -180,11 +202,16 @@ jobs:
 
       - name: Commit the bump via the GitHub API (server-side signed)
         env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
+          # Fall back to the built-in token. `${A:-$B}` is resolved by bash, not
+          # by the expression engine, so an unset PAT yields GITHUB_TOKEN rather
+          # than an empty string that would 401 halfway through.
+          RELEASE_PAT: ${{ secrets.GH_RELEASE_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.build-push.outputs.image_tag }}
         shell: bash
         run: |
           set -euo pipefail
+          export GH_TOKEN="${RELEASE_PAT:-$GITHUB_TOKEN}"
           F=deploy/helm/fuzex/values-prod.yaml
           if git diff --quiet -- "$F"; then
             echo "No change to $F — already at ${TAG}."
