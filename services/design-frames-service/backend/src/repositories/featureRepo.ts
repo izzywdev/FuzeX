@@ -80,11 +80,15 @@ export async function listFeaturesByProject(
   if (page.cursor) {
     const { v, id } = decodeCursor(page.cursor);
     params.push(v, id);
-    extraWhere = ` and (created_at, slug) > ($2, $3)`;
+    // Explicit ::timestamptz cast — the cursor's `v` carries FULL
+    // microsecond precision (see cursor_ts below; same fix as
+    // projectRepo/discussionRepo/approvalRepo), so bind it back at that
+    // same precision rather than relying on an implicit/ambiguous cast.
+    extraWhere = ` and (created_at, slug) > ($2::timestamptz, $3)`;
   }
   params.push(page.limit + 1);
-  const { rows } = await query<FeatureRow>(
-    `select * from design_frames.feature where project_id = $1${extraWhere}
+  const { rows } = await query<FeatureRow & { cursor_ts: string }>(
+    `select *, created_at::text as cursor_ts from design_frames.feature where project_id = $1${extraWhere}
      order by created_at asc, slug asc limit $${params.length}`,
     params,
     log
@@ -113,7 +117,7 @@ export async function listFeaturesByProject(
   }
   const nextCursor = hasMore
     ? Buffer.from(
-        JSON.stringify({ v: pageRows[pageRows.length - 1].created_at.toISOString(), id: pageRows[pageRows.length - 1].slug }),
+        JSON.stringify({ v: pageRows[pageRows.length - 1].cursor_ts, id: pageRows[pageRows.length - 1].slug }),
         'utf8'
       ).toString('base64url')
     : null;

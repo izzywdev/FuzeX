@@ -15,6 +15,17 @@ export interface ProjectRow {
   updated_at: Date;
 }
 
+/** `ProjectRow` plus the FULL microsecond-precision text rendering of
+ * `created_at`, used ONLY for the pagination cursor — `pg` parses
+ * `timestamptz` into a millisecond JS `Date`, but Postgres stores
+ * microseconds, so a cursor built from `row.created_at.toISOString()` loses
+ * precision and a boundary row can reappear across pages. Selecting
+ * `created_at::text` keeps the full precision for the cursor while the
+ * `Date` continues to serve the DTO's ISO timestamp. */
+interface ProjectCursorRow extends ProjectRow {
+  cursor_ts: string;
+}
+
 export interface ProjectDTO {
   id: EntityId<'project'>;
   name: string;
@@ -107,12 +118,16 @@ export async function listProjects(page: PageParams, log: ReqLogger): Promise<Pa
   let where = '';
   if (page.cursor) {
     const { v, id } = decodeCursor(page.cursor);
+    // Bind the full-precision cursor text back as an explicit timestamptz so
+    // the row comparison compares at the same microsecond precision Postgres
+    // stores, rather than relying on an implicit/ambiguous cast.
     params.push(v, toUuid(id as EntityId<'project'>));
-    where = `where (created_at, id) > ($1, $2)`;
+    where = `where (created_at, id) > ($1::timestamptz, $2)`;
   }
   params.push(page.limit + 1);
-  const { rows } = await query<ProjectRow>(
-    `select * from design_frames.project ${where} order by created_at asc, id asc limit $${params.length}`,
+  const { rows } = await query<ProjectCursorRow>(
+    `select *, created_at::text as cursor_ts from design_frames.project ${where}
+     order by created_at asc, id asc limit $${params.length}`,
     params,
     log
   );
@@ -120,7 +135,7 @@ export async function listProjects(page: PageParams, log: ReqLogger): Promise<Pa
     rows,
     page.limit,
     toProjectDTO,
-    (row) => ({ v: row.created_at.toISOString(), id: fromUuid('project', row.id) })
+    (row) => ({ v: row.cursor_ts, id: fromUuid('project', row.id) })
   );
 }
 

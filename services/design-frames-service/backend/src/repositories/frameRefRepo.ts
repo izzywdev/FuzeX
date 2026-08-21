@@ -42,3 +42,33 @@ export async function listByFeature(featureId: string, log: ReqLogger): Promise<
   );
   return rows;
 }
+
+export interface ManifestFrameForIndexing {
+  file: string;
+  flow?: string;
+}
+
+/**
+ * Upserts one frame_ref row per frame declared in the feature's manifest, at
+ * the given content stamp — the LIVE-route counterpart to
+ * scripts/backfill.ts's identical loop, so `frame`/`element` discussion
+ * targets (DiscussionTargetType, docs/postgres-tier.md) become discoverable
+ * via the running API instead of only after an out-of-band backfill run.
+ * Idempotent (the table's own UNIQUE (feature_id, file, content_stamp)
+ * upsert-no-op), so calling this on every stamp write is safe.
+ */
+export async function indexFrameRefsFromManifest(
+  featureId: string,
+  frames: ManifestFrameForIndexing[],
+  flowIdByKey: Map<string, string>,
+  contentStamp: string,
+  log: ReqLogger
+): Promise<number> {
+  let count = 0;
+  for (const frame of frames) {
+    const flowId = frame.flow ? (flowIdByKey.get(frame.flow) ?? null) : null;
+    await upsertFrameRef(featureId, flowId, frame.file, contentStamp, log);
+    count += 1;
+  }
+  return count;
+}

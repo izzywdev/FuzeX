@@ -27,10 +27,21 @@ function log(req: Request) {
   return (req as LoggedRequest).log!;
 }
 
+// The Comment author reference is SERVER-DERIVED, never client-chosen
+// (identifier-standard: "an id is never a capability" — a client must not
+// be able to name who authored a row; openapi.yaml's CommentCreate is
+// additionalProperties:false and declares NO `authorRef` property, only
+// `body`/`parentCommentId`/`authorType`). This service authenticates writes
+// with a single SHARED bearer token (middleware/auth.ts) rather than a
+// per-user principal, so there is no real per-user identity to derive from
+// yet — this constant stands in for "the authenticated service actor" until
+// the auth model carries one. See PR description: a richer per-user
+// authorRef needs a per-user auth model upstream of this service.
+const SERVICE_ACTOR_REF = 'service-actor';
+
 function resolveActor(body: Record<string, unknown>): { authorRef: string; authorType: 'user' | 'agent' } {
-  const authorRef = typeof body.authorRef === 'string' ? body.authorRef : 'anonymous';
   const authorType = body.authorType === 'agent' ? 'agent' : 'user';
-  return { authorRef, authorType };
+  return { authorRef: SERVICE_ACTOR_REF, authorType };
 }
 
 function toWireDiscussion(row: discussionRepo.DiscussionRow): ReturnType<typeof discussionRepo.toDiscussionDTO> {
@@ -139,7 +150,10 @@ discussionsRouter.post('/:id/comments', async (req, res) => {
   const id = assertRef('discussion', req.params.id) as EntityId<'discussion'>;
   const discussion = await discussionRepo.getDiscussion(id, log(req));
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const allowed = new Set(['body', 'parentCommentId', 'authorType', 'authorRef']);
+  // openapi.yaml CommentCreate: additionalProperties:false, properties
+  // body/parentCommentId/authorType ONLY — no `authorRef` (see
+  // resolveActor() above for why).
+  const allowed = new Set(['body', 'parentCommentId', 'authorType']);
   const unknown = Object.keys(body).filter((k) => !allowed.has(k));
   const errors: string[] = [];
   if (unknown.length) errors.push(`unexpected propert${unknown.length === 1 ? 'y' : 'ies'}: ${unknown.join(', ')}`);
