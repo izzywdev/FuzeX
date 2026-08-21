@@ -1,0 +1,31 @@
+{
+  "name": "@fuzex/identity",
+  "version": "0.1.0",
+  "description": "Server-owned entity identifiers (TypeID: prefix + UUIDv7 base32) for FuzeX's own product-local entity types. Independent re-implementation of the same wire format as @izzywdev/fuzefront-identity (see README.md) — this repo keeps its OWN registry per governance/identifier-standard.md #2 ('each repo keeps its own registry, there is deliberately no central one').",
+  "private": true,
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/identity.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.5.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/izzywdev/FuzeX.git",
+    "directory": "packages/identity"
+  }
+}
