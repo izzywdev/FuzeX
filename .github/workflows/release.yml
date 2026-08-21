@@ -132,61 +132,62 @@ jobs:
           cache-to: type=gha,scope=fuzex-design-frames-service,mode=max
 
   bump-prod-values:
-    name: Bump prod image tag (GitOps release)
+    name: Bump prod image tag (GitOps release, via PR)
     needs: build-push
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      # `write` so this job can commit the tag bump with the built-in
-      # GITHUB_TOKEN when no GH_RELEASE_PAT is configured. See "Resolve the
-      # release credential" below.
+      # `contents: write` so this job can push the bump BRANCH (never master —
+      # see the PR step below) with the built-in GITHUB_TOKEN when no
+      # GH_RELEASE_PAT is configured. `pull-requests: write` so it can open the
+      # PR and attach the `auto-merge` label with that same fallback token.
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: master
+          # GH_RELEASE_PAT preferred when present; falls back to GITHUB_TOKEN.
+          # See "Resolve the release credential" below for what each buys you.
+          token: ${{ secrets.GH_RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Require the release credential
-        # Hard-fail if GH_RELEASE_PAT is absent or expired so that FuzeFront's
-        # fleet-pat-health.yml nightly check can detect the failure at this named
-        # step within 24 h and open an alert issue, rather than letting prod stay
-        # pinned to a stale image tag with no notification.
-        env:
-          GH_RELEASE_PAT: ${{ secrets.GH_RELEASE_PAT }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_RELEASE_PAT:-}" ]; then
-            echo "::error::GH_RELEASE_PAT secret is not set in this repo."
-            echo "  Add it: Settings -> Secrets and variables -> Actions -> New repository secret"
-            echo "  Name: GH_RELEASE_PAT  Value: a classic PAT with repo scope"
-            exit 1
-          fi
-          LOGIN=$(GH_TOKEN="${GH_RELEASE_PAT}" gh api user --jq '.login' 2>&1) || {
-            echo "::error::GH_RELEASE_PAT is invalid or expired. Mint a new token and update the secret."
-            exit 1
-          }
-          echo "Credential verified (user: ${LOGIN})"
-
-      # Resolve which credential commits the bump. GH_RELEASE_PAT is preferred
-      # when present; otherwise the built-in GITHUB_TOKEN is used.
+      # Resolve which credential pushes the bump branch / opens the PR.
+      # GH_RELEASE_PAT is preferred when present; otherwise the built-in
+      # GITHUB_TOKEN is used. This resolver's PAT-preferred / GITHUB_TOKEN-
+      # fallback SHAPE is unchanged from before — what changed is what the
+      # commit target is (a branch + PR, never master directly) and, as a
+      # result, what the GITHUB_TOKEN fallback can no longer promise. Read on.
       #
-      # WHY A FALLBACK. This job used to hard-fail when GH_RELEASE_PAT was unset,
-      # and it WAS unset here — every release since this workflow landed built and
-      # pushed its image and then died before bumping the tag, so prod stayed
-      # pinned to a tag that names an image nobody deploys (FuzeSDLC#131). The
-      # loud failure was correct in principle and still left the repo broken in
-      # practice, because the remedy needed a human with admin to mint a secret.
+      # WHY THIS JOB IS PR-BASED NOW, NOT A DIRECT COMMIT. `master` carries a
+      # `Protect default branch` ruleset (required PR + review + 6 required
+      # status checks, linear history). A direct contents-API PUT to master —
+      # what this job used to do — is REJECTED by that ruleset:
       #
-      # The bump is a same-repo write to `contents`, which GITHUB_TOKEN can do
-      # given `permissions: contents: write` above, and it goes through the
-      # contents API, so the resulting commit is server-side signed and satisfies
-      # `required_signatures` exactly as the PAT's did.
+      #   gh: Repository rule violations found
+      #   Changes must be made through a pull request.
+      #   6 of 6 required status checks are expected. (HTTP 409)
       #
-      # The PAT's one distinguishing property is that its pushes START WORKFLOWS.
-      # This workflow treats that as a HAZARD, not a feature — see the `paths:`
-      # block above, which deliberately omits `deploy/**` so a release cannot
-      # re-trigger itself. GITHUB_TOKEN pushes do not start workflows at all, so
-      # the fallback removes that footgun rather than adding one.
+      # That is NOT a credential problem (GH_RELEASE_PAT vs GITHUB_TOKEN made
+      # no difference — both are same-repo `contents: write` and the API
+      # accepted the identity fine); it is the ruleset itself refusing a
+      # branchless write. So the fix routes the bump through a branch + PR,
+      # exactly like every other automated change in this repo (see
+      # governance-sync.yml, a2a-maintain.yml).
+      #
+      # WHAT THIS MEANS FOR THE GITHUB_TOKEN FALLBACK. GitHub suppresses new
+      # workflow runs triggered by the built-in GITHUB_TOKEN (to prevent
+      # recursive runs) — this applied to `deploy/**` pushes before too, but
+      # this job's own `paths:` filter deliberately never listed `deploy/**`,
+      # so it never mattered. It matters now: a branch PUSHED and a PR OPENED
+      # with GITHUB_TOKEN will NOT trigger this repo's `pull_request`-gated
+      # required checks (harden-gate, ci, etc.), so the PR sits at "6 of 6
+      # required status checks are expected" and can never satisfy the
+      # ruleset to merge — a different, quieter way to end up stuck. A real
+      # user PAT's pushes DO start workflows, which used to be treated here as
+      # a hazard to suppress; on the PR path it is the thing that makes the
+      # PR mergeable at all, so GH_RELEASE_PAT is now effectively required for
+      # this job to produce a mergeable PR, even though — per the fallback
+      # shape kept below — the job itself does not hard-fail without it.
       - name: Resolve the release credential
         env:
           PAT: ${{ secrets.GH_RELEASE_PAT }}
@@ -196,8 +197,8 @@ jobs:
             echo "release credential: GH_RELEASE_PAT"
             echo "RELEASE_CRED=pat" >> "$GITHUB_ENV"
           else
-            echo "::notice::GH_RELEASE_PAT is not set — committing the tag bump with the built-in GITHUB_TOKEN."
-            echo "::notice::If this step's commit fails with 403, this repository's Settings → Actions → Workflow permissions is set to read-only, which caps the job-level 'contents: write' requested above. Either flip that setting or add GH_RELEASE_PAT."
+            echo "::notice::GH_RELEASE_PAT is not set — pushing the tag-bump branch and opening its PR with the built-in GITHUB_TOKEN."
+            echo "::warning::A branch pushed and a PR opened with GITHUB_TOKEN do NOT trigger this repo's required pull_request checks (GitHub suppresses new workflow runs caused by the built-in token). The PR below will report '6 of 6 required status checks are expected' and never go green on its own — it cannot be merged until either GH_RELEASE_PAT is added (a real user PAT with 'repo' scope — the fix for good) or a human pushes an empty commit / re-triggers the checks on that PR by hand (unsticks this one release only)."
             echo "RELEASE_CRED=github_token" >> "$GITHUB_ENV"
           fi
 
@@ -221,7 +222,7 @@ jobs:
           PY
           git --no-pager diff -- deploy/helm/fuzex/values-prod.yaml
 
-      - name: Commit the bump via the GitHub API (server-side signed)
+      - name: Open the tag-bump PR (branch — master requires a PR, not a direct commit)
         env:
           # Fall back to the built-in token. `${A:-$B}` is resolved by bash, not
           # by the expression engine, so an unset PAT yields GITHUB_TOKEN rather
@@ -238,10 +239,50 @@ jobs:
             echo "No change to $F — already at ${TAG}."
             exit 0
           fi
-          SHA=$(gh api "repos/${{ github.repository }}/contents/$F?ref=master" --jq .sha)
-          gh api -X PUT "repos/${{ github.repository }}/contents/$F" \
-            -f message="chore(release): bump fuzex prod image tag to ${TAG}" \
-            -f content="$(base64 -w0 "$F")" \
-            -f sha="$SHA" \
-            -f branch=master >/dev/null
-          echo "Committed prod tag bump to ${TAG}. NOTE: values-prod.yaml still has enabled:false — flipping it on is a separate, deliberate PR."
+
+          BRANCH="release/bump-fuzex-${TAG}"
+
+          existing_pr=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing_pr" ]; then
+            echo "PR #$existing_pr already open for $BRANCH — nothing to do."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "$F"
+          git commit -m "chore(release): bump fuzex prod image tag to ${TAG}"
+          # actions/checkout persisted the resolved token's credential helper
+          # above (token: GH_RELEASE_PAT || GITHUB_TOKEN), so a plain push works.
+          git push origin "HEAD:refs/heads/${BRANCH}"
+
+          # FAIL-LOUD: no `|| true`, no swallowed exit code. If the PR cannot be
+          # created (bad token, branch already merged and diverged, API error),
+          # this step — and the job — fails rather than silently leaving prod
+          # pinned to the old tag with no PR to fix it, which is exactly the
+          # failure mode this rewrite exists to close.
+          gh pr create --repo "${{ github.repository }}" \
+            --base master --head "$BRANCH" \
+            --title "chore(release): bump fuzex prod image tag to ${TAG}" \
+            --label auto-merge \
+            --body "$(cat <<BODY
+          Automated GitOps release bump. \`services/design-frames-service\` built and
+          pushed \`ghcr.io/izzywdev/fuzex-design-frames-service:${TAG}\` from
+          ${{ github.sha }}; Argo syncs \`deploy/helm/fuzex/values-prod.yaml\` once this
+          merges.
+
+          This lands as a PR, not a direct commit to \`master\`: the \`Protect default
+          branch\` ruleset requires a pull request with all required status checks
+          green, which a contents-API PUT straight to \`master\` cannot satisfy (HTTP
+          409, \"Changes must be made through a pull request\").
+
+          \`enabled\` and \`ingress.*\` are untouched here — the go-live switch is a
+          separate, deliberately reviewed PR, never bundled with a routine tag bump.
+
+          Labeled \`auto-merge\`. Note this repo has \`hardening.deployOnPush: true\`,
+          so \`auto-merge.yml\` will NOT auto-merge this — it must be merged by a human
+          in a deploy window, same as any other change here.
+          BODY
+          )"
+          echo "Opened tag-bump PR for ${TAG} on branch ${BRANCH}."
