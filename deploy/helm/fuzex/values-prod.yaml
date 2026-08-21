@@ -47,3 +47,21 @@ ingress:
   enabled: false
   className: traefik
   host: ""
+
+# =============================================================================
+# postgresTier — Postgres lifecycle tier (services/design-frames-service/backend/
+# + db/migrations/, docs/postgres-tier.md). Stays FALSE here for the same
+# reason the top-level `enabled` above does: the image, the FuzeInfra-side
+# database/role/schema, and the DATABASE_URL SealedSecret in `fuzex` do not
+# exist yet (deploy/infra-requests/design-frames-postgres.md is the hand-off
+# request for the latter two). Flip to true only after all three exist, in
+# ONE PR, during a deploy window.
+# =============================================================================
+postgresTier:
+  enabled: false
+
+  image:
+    # POSTGRES_TIER_IMAGE_TAG — bumped by release.yml's postgres-tier build
+    # job the same way image.tag above is bumped. DO NOT edit by hand.
+    tag: "0.1.0"
+    pullPolicy: Always

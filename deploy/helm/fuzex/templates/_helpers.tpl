@@ -17,3 +17,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 app.kubernetes.io/name: fuzex
 app.kubernetes.io/component: design-frames-service
 {{- end -}}
+
+{{- define "fuzex.pgTierSelectorLabels" -}}
+app.kubernetes.io/name: fuzex
+app.kubernetes.io/component: postgres-tier
+{{- end -}}
