@@ -45,8 +45,10 @@ RUN npm run build
 # via `file:../../../packages/identity` (packages/identity/, repo root) —
 # OUTSIDE this Dockerfile's own build context (services/design-frames-service/),
 # so it cannot be `COPY`-ed directly. Supplied as the Buildx ADDITIONAL build
-# context named "identity" (`--build-context identity=../../packages/identity`,
-# resolved relative to the repo-root checkout — see the workflow invocations).
+# context named "identity" (`--build-context identity=./packages/identity`,
+# resolved relative to the invoking command's cwd — the repo-root checkout in
+# both design-frames-service-ci.yml and release.yml — NOT relative to the
+# primary `context` above).
 # The stages below recreate the repo's own relative directory depth
 # (.../services/design-frames-service/backend sits 3 levels below
 # packages/identity) so `file:../../../packages/identity` resolves inside the
@@ -68,7 +70,20 @@ COPY --from=identity-builder /build/packages/identity /build/packages/identity
 # stage's absolute paths are left behind by the final COPY --from below.
 RUN npm install --no-audit --no-fund --install-links
 COPY backend/ ./
-RUN npm run build && npm prune --omit=dev
+# NOT `npm prune --omit=dev` — verified (locally, outside Docker, since this
+# sandbox has no daemon) that `npm prune` re-resolves the LOCAL `file:`
+# dependency `@fuzex/identity` back into a relative SYMLINK, discarding the
+# `--install-links` copy above. That symlink
+# (node_modules/@fuzex/identity -> ../../../../../packages/identity) only
+# resolves inside THIS stage, where /build/packages/identity still exists —
+# it dangles the moment node_modules is copied into the final stage below,
+# and `require('@fuzex/identity')` (backend/src/lib/identity.ts) then throws
+# MODULE_NOT_FOUND at boot, before the app ever binds its port. A fresh
+# `--omit=dev --install-links` install (rather than pruning the existing
+# one) keeps the real copy.
+RUN npm run build \
+    && rm -rf node_modules \
+    && npm install --no-audit --no-fund --omit=dev --install-links
 
 # Final stage for the Postgres lifecycle tier — ONE image, shared by BOTH the
 # backend Deployment (`node backend/dist/index.js`, port 4410) AND the
@@ -83,12 +98,27 @@ WORKDIR /app
 COPY --from=backend-builder /build/services/design-frames-service/backend/dist ./backend/dist
 COPY --from=backend-builder /build/services/design-frames-service/backend/node_modules ./backend/node_modules
 COPY --from=backend-builder /build/services/design-frames-service/backend/package.json ./backend/package.json
+# The dual-write projection (docs/postgres-tier.md step 3): backend/src/lib/
+# {fileStore,manifestSchema,stampLib}.ts each `require()` a sibling of THIS
+# service's own ../lib/{store,schema,stamp}.js at a computed runtime path
+# (`path.join(__dirname, '..', '..', '..', 'lib', '<file>.js')` — 3 levels up
+# from backend/dist/lib/, i.e. THIS image's /app/lib/, mirroring the repo's
+# own layout, services/design-frames-service/{backend,lib}/ as siblings).
+# None of the three touch the filesystem at require()-time (verified by
+# reading lib/store.js — DATA_DIR is only a resolved path constant), so this
+# copy alone is enough to boot; actual dual-write reads/writes need
+# DESIGN_FRAMES_DATA_DIR to point at the SAME data volume the frontend
+# Deployment mounts (wired in deploy/helm/fuzex/templates/postgres-tier-deployment.yaml).
+COPY lib/ ./lib/
 COPY db/migrate.sh ./db/migrate.sh
 COPY db/migrations ./db/migrations
 RUN chmod +x ./db/migrate.sh
 
 ENV DESIGN_FRAMES_HOST=0.0.0.0
 ENV DESIGN_FRAMES_PG_PORT=4410
+# Matches the vanilla stage's own default below and .Values.persistence.mountPath
+# — the dual-write projection's fallback when the Deployment doesn't override it.
+ENV DESIGN_FRAMES_DATA_DIR=/data/features
 EXPOSE 4410
 HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://127.0.0.1:'+(process.env.DESIGN_FRAMES_PG_PORT||4410)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 

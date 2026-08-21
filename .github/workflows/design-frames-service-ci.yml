@@ -89,10 +89,18 @@ jobs:
       - name: Smoke-check the postgres-tier image serves /health (no DATABASE_URL required)
         run: |
           docker run -d --name dfs-pg-smoke -p 4410:4410 design-frames-postgres-tier:ci
-          for i in $(seq 1 20); do
-            curl -sf http://127.0.0.1:4410/health && break
+          ok=
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4410/health && { ok=1; break; }
             sleep 1
           done
-          curl -sf http://127.0.0.1:4410/health
-          docker logs dfs-pg-smoke
-          docker rm -f dfs-pg-smoke
+          # ALWAYS dump the container's logs before asserting pass/fail — a
+          # crash-on-boot (e.g. a MODULE_NOT_FOUND from a broken node_modules
+          # symlink) exits the container long before /health ever answers,
+          # and the previous form here let the final bare `curl -sf` fail
+          # first under `set -e`, which skipped `docker logs` entirely and
+          # threw away the one thing that would have explained the failure.
+          echo "----- container logs -----"
+          docker logs dfs-pg-smoke || true
+          docker rm -f dfs-pg-smoke || true
+          test -n "$ok"
