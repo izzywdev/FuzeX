@@ -33,7 +33,7 @@
 enabled: false
 
 image:
-  tag: "577c70013c6a"
+  tag: "2a30510f94f6"
   pullPolicy: Always
 
 imagePullSecrets:
