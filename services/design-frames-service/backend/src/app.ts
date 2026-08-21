@@ -15,12 +15,22 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(requestLogger);
 
-  // CORS — mirrors ../server.js's convention (reflect Origin; reads are
-  // public, writes still require the bearer token below).
+  // CORS — the Fuze family serves this API SAME-ORIGIN (FuzeFront's
+  // no-cross-origin-base rule), so no CORS header is needed by default. When a
+  // deployment genuinely needs cross-origin access, ALLOWED_ORIGINS (a literal,
+  // comma-separated allowlist) is the ONLY way to grant it. The request Origin
+  // is never reflected blindly — the header value is taken from the matched
+  // allowlist entry, not from req.headers (CWE-942 CORS misconfiguration).
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.use((req: Request, res: Response, next: NextFunction) => {
-    const origin = req.headers['origin'];
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+    const reqOrigin = req.headers['origin'];
+    const allowed =
+      typeof reqOrigin === 'string' ? allowedOrigins.find((o) => o === reqOrigin) : undefined;
+    if (allowed) {
+      res.setHeader('Access-Control-Allow-Origin', allowed);
       res.setHeader('Vary', 'Origin');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');

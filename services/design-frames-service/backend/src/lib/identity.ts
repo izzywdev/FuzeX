@@ -12,13 +12,18 @@ export {
   fromUuid,
   entityTypeOf,
   configureIdentity,
-  ENTITY_PREFIXES,
-  ENTITY_TYPES,
   isEntityType,
   IdentityError,
   type EntityId,
   type EntityType,
 } from '@fuzex/identity';
+
+// NOTE: the raw prefix/type registry lives ONLY in @fuzex/identity
+// (packages/identity) — the single source of truth. It is deliberately NOT
+// re-exported through this thin app-local module: import it straight from
+// '@fuzex/identity' where the raw map is needed. (Re-exporting that registry
+// token here also made gate-identifier's --namespace scanner mis-read the
+// DISCUSSION_TARGET_ENTITY_TYPE map below as a second, un-namespaced registry.)
 
 // discussion.target_type ('project'|'feature'|'flow'|'frame'|'element') ->
 // the EntityType actually stored (frame_ref backs both 'frame' and
