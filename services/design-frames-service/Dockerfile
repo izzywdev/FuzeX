@@ -23,6 +23,81 @@ RUN --mount=type=secret,id=github_token \
 COPY webapp/ ./
 RUN npm run build
 
+# ---------------------------------------------------------------------------
+# Postgres LIFECYCLE TIER (services/design-frames-service/backend/ +
+# services/design-frames-service/db/) — see ../docs/postgres-tier.md.
+# Isolated Express+pg+TypeScript process, its OWN port (4410,
+# backend/src/index.ts), never mounted into or served by the vanilla
+# server.js above. NOT the default build target: `docker build .` with no
+# `--target` still produces only the unchanged vanilla image below (the
+# stages here are unreferenced by it, so BuildKit never even builds them);
+# producing this tier requires `--target postgres-tier` (wired in
+# design-frames-service-ci.yml / release.yml).
+#
+# node:24-alpine, not node:20 — backend/package.json AND this service's own
+# top-level package.json both already declare `engines.node: >=24.0.0`. This
+# does not touch the vanilla runtime stage below, which stays on its own
+# line per its own comment ("bumping the runtime line is a separate,
+# repo-wide toolchain decision") — the bump here is scoped to this new,
+# separately-published tier only.
+#
+# backend/package.json depends on the LOCAL workspace package @fuzex/identity
+# via `file:../../../packages/identity` (packages/identity/, repo root) —
+# OUTSIDE this Dockerfile's own build context (services/design-frames-service/),
+# so it cannot be `COPY`-ed directly. Supplied as the Buildx ADDITIONAL build
+# context named "identity" (`--build-context identity=../../packages/identity`,
+# resolved relative to the repo-root checkout — see the workflow invocations).
+# The stages below recreate the repo's own relative directory depth
+# (.../services/design-frames-service/backend sits 3 levels below
+# packages/identity) so `file:../../../packages/identity` resolves inside the
+# image exactly as it does in the checkout, with no edit to that package.json.
+FROM node:24-alpine AS identity-builder
+WORKDIR /build/packages/identity
+COPY --from=identity package.json package-lock.json ./
+RUN npm install --no-audit --no-fund
+COPY --from=identity . .
+RUN npm run build
+
+FROM node:24-alpine AS backend-builder
+WORKDIR /build/services/design-frames-service/backend
+COPY backend/package.json backend/package-lock.json ./
+COPY --from=identity-builder /build/packages/identity /build/packages/identity
+# --install-links: copies the local @fuzex/identity package.json's declared
+# `files` (dist/, package.json, README.md) into node_modules instead of
+# symlinking to /build/packages/identity — a symlink would dangle once this
+# stage's absolute paths are left behind by the final COPY --from below.
+RUN npm install --no-audit --no-fund --install-links
+COPY backend/ ./
+RUN npm run build && npm prune --omit=dev
+
+# Final stage for the Postgres lifecycle tier — ONE image, shared by BOTH the
+# backend Deployment (`node backend/dist/index.js`, port 4410) AND the
+# db-migration Job (`db/migrate.sh` against DATABASE_URL — see
+# ../db/README.md "pre-sync Argo/Helm Job"), so this adds exactly ONE new
+# published image, not two. `bash` + `postgresql-client` are the only extra
+# runtime deps migrate.sh needs — it is otherwise dependency-free (no
+# node_modules, no pg client library; see db/README.md).
+FROM node:24-alpine AS postgres-tier
+RUN apk add --no-cache bash postgresql-client
+WORKDIR /app
+COPY --from=backend-builder /build/services/design-frames-service/backend/dist ./backend/dist
+COPY --from=backend-builder /build/services/design-frames-service/backend/node_modules ./backend/node_modules
+COPY --from=backend-builder /build/services/design-frames-service/backend/package.json ./backend/package.json
+COPY db/migrate.sh ./db/migrate.sh
+COPY db/migrations ./db/migrations
+RUN chmod +x ./db/migrate.sh
+
+ENV DESIGN_FRAMES_HOST=0.0.0.0
+ENV DESIGN_FRAMES_PG_PORT=4410
+EXPOSE 4410
+HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://127.0.0.1:'+(process.env.DESIGN_FRAMES_PG_PORT||4410)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+USER node
+# Default command runs the API; the migration Job (Helm) overrides `command`
+# to run db/migrate.sh instead — see
+# deploy/helm/fuzex/templates/db-migrate-job.yaml.
+CMD ["node", "backend/dist/index.js"]
+
 # Runtime stays on node:20-alpine (unchanged): the service's own package.json
 # declares `engines.node: >=18.0.0` and the rest of this repo's CI still runs
 # on the Node 20 line (see ci.yml, design-frames-service-ci.yml) — server.js

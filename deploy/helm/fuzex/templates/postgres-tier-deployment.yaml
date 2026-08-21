@@ -1,0 +1,71 @@
+{{- if and .Values.enabled .Values.postgresTier.enabled }}
+{{/*
+design-frames-service Postgres LIFECYCLE TIER — the isolated Express+pg+TS
+process from services/design-frames-service/backend/ (docs/postgres-tier.md).
+A SEPARATE Deployment from the vanilla frontend above: its own image (the
+Dockerfile's `postgres-tier` build target), its own port (4410), its own
+rollout. Ordinary RollingUpdate is fine here — unlike the vanilla Deployment
+above, this tier is stateless itself (Postgres holds the state; there is no
+local PVC to fight over for a ReadWriteOnce mount).
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fuzex.fullname" . }}-postgres-tier
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-tier
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "fuzex.pgTierSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fuzex.pgTierSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres-tier
+          image: "{{ .Values.postgresTier.image.repository }}:{{ .Values.postgresTier.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresTier.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.postgresTier.service.port }}
+          env:
+            - name: DESIGN_FRAMES_HOST
+              value: "0.0.0.0"
+            - name: DESIGN_FRAMES_PG_PORT
+              value: {{ .Values.postgresTier.service.port | quote }}
+            # Sourced from a FuzeInfra-provisioned SealedSecret — this chart
+            # never creates it (deploy/infra-requests/design-frames-postgres.md).
+            # NOT optional: backend/src/lib/db.ts throws on the first query if
+            # this is unset, so a pod missing it should fail loudly rather
+            # than silently 500 every lifecycle request.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresTier.databaseSecret.name | quote }}
+                  key: {{ .Values.postgresTier.databaseSecret.key | quote }}
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.postgresTier.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ['ALL']
+{{- end }}

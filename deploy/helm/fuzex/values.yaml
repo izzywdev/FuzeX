@@ -85,6 +85,73 @@ resources:
 webapp:
   dir: ""
 
+# -- postgresTier: the Postgres LIFECYCLE tier (services/design-frames-service/
+# backend/ + db/migrations/, docs/postgres-tier.md). A SEPARATE Deployment +
+# Service (its own port, 4410) from the vanilla frontend above, built from its
+# OWN image (Dockerfile's `postgres-tier` build target) — an isolated process
+# with an isolated rollout, exactly as docs/postgres-tier.md specifies
+# ("isolated from the vanilla bridge-server.js/server.js").
+#
+# `enabled: false` here, deliberately, for the same reason the top-level
+# `enabled` above is false: none of the three prerequisites exist yet —
+#   1. the postgresTier image has never been published (this PR adds the
+#      build target; release.yml publishes it on the next push to master
+#      that touches services/design-frames-service/**);
+#   2. FuzeInfra has not yet provisioned the Postgres database, the
+#      design_frames schema, the role, or the DATABASE_URL SealedSecret (see
+#      deploy/infra-requests/design-frames-postgres.md — the hand-off request,
+#      never provisioned from this repo);
+#   3. `databaseSecret.name` below does not exist as a SealedSecret in the
+#      `fuzex` namespace yet.
+# Flip to true only after all three exist, in one PR, during a deploy window
+# — mirroring the top-level go-live order in values-prod.yaml.
+postgresTier:
+  enabled: false
+
+  image:
+    repository: ghcr.io/izzywdev/fuzex-design-frames-postgres-tier
+    # Bumped by .github/workflows/release.yml's postgres-tier build job on
+    # every push to master that touches services/design-frames-service/**;
+    # Argo detects the diff and rolls it. Never edit this by hand in the prod
+    # overlay.
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    # Matches backend/src/index.ts's DESIGN_FRAMES_PG_PORT default (4410) —
+    # deliberately different from `service.port` (4400) above so both tiers
+    # can run side by side during rollout (docs/postgres-tier.md "Migration
+    # path").
+    port: 4410
+
+  # -- DATABASE_URL, sourced from a FuzeInfra-provisioned SealedSecret in the
+  # `fuzex` namespace. This chart NEVER creates the secret, the role, the
+  # schema, or the database itself — see
+  # deploy/infra-requests/design-frames-postgres.md for the hand-off request.
+  # NOT `optional` in the pod spec (unlike apiTokens above): backend/src/lib/db.ts
+  # throws on the first query if DATABASE_URL is unset, so a pod missing it
+  # should fail loudly (CrashLoopBackOff) rather than silently 500 every
+  # lifecycle request.
+  databaseSecret:
+    name: fuzex-design-frames-db
+    key: DATABASE_URL
+
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+  # -- the db-migration Job (db/migrate.sh, templates/db-migrate-job.yaml),
+  # run as an Argo CD PreSync hook — see that template for why PreSync (Argo)
+  # and not a Helm pre-install/pre-upgrade hook.
+  migration:
+    # migrate.sh is idempotent end-to-end (db/README.md) — tracked per-file in
+    # design_frames._migrations, and every migration file is independently
+    # re-runnable — so a retry after a transient connection failure is safe.
+    backoffLimit: 2
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { cpu: 200m, memory: 128Mi }
+
 # -- federatedMount: the SAME-ORIGIN portal mount for the Module-Federation
 # remote. This is a DIFFERENT surface from `ingress` above (a public origin for
 # the mobile/standalone case): it exposes the remote under the FuzeFront HOST

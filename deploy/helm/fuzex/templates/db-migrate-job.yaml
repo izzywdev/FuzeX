@@ -1,0 +1,71 @@
+{{- if and .Values.enabled .Values.postgresTier.enabled }}
+{{/*
+db-migrate — applies services/design-frames-service/db/migrations/**
+(db/migrate.sh) against DATABASE_URL before the postgres-tier Deployment
+above is synced/rolled.
+
+ARGO CD PreSync HOOK, NOT a Helm pre-install/pre-upgrade hook — chosen
+because this chart is applied ONLY by Argo CD (deploy/argocd/application.yaml,
+`syncPolicy.automated`; nobody runs `helm upgrade --install` by hand or in CI
+here — see that file's header comment). Argo's own sync-wave/hook lifecycle
+is what actually governs this chart in every real environment, so a hook
+Argo itself understands natively is the correct mechanism, not a Helm-CLI
+convention this repo never otherwise exercises. db/README.md already names
+this by role: "In-cluster, this script is the entrypoint for a pre-sync
+Argo/Helm Job... not an init-container racing multiple replicas, and not run
+at app startup."
+
+HookSucceeded deletion: migrate.sh is idempotent (db/README.md — tracked via
+design_frames._migrations, every file independently re-runnable), so nothing
+is lost by not keeping a completed Job object around, and the next sync's
+fresh Job will simply no-op through every already-applied file.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "fuzex.fullname" . }}-db-migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-migrate
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: {{ .Values.postgresTier.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fuzex
+        app.kubernetes.io/component: db-migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: db-migrate
+          image: "{{ .Values.postgresTier.image.repository }}:{{ .Values.postgresTier.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresTier.image.pullPolicy }}
+          # Overrides the image's default CMD (`node backend/dist/index.js`) —
+          # this Job runs the migration runner instead of the API.
+          command: ['bash', '/app/db/migrate.sh']
+          env:
+            # Same FuzeInfra-provisioned SealedSecret the Deployment consumes
+            # — this chart never creates it (see
+            # deploy/infra-requests/design-frames-postgres.md).
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresTier.databaseSecret.name | quote }}
+                  key: {{ .Values.postgresTier.databaseSecret.key | quote }}
+          resources:
+            {{- toYaml .Values.postgresTier.migration.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ['ALL']
+{{- end }}

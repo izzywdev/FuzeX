@@ -46,6 +46,11 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/izzywdev/fuzex-design-frames-service
+  # Postgres lifecycle tier (services/design-frames-service/backend/ + db/,
+  # docs/postgres-tier.md) — a separate image, same Dockerfile, `postgres-tier`
+  # build target. Shared by the postgres-tier Deployment and the db-migrate
+  # Job (deploy/helm/fuzex/templates/).
+  IMAGE_POSTGRES_TIER: ghcr.io/izzywdev/fuzex-design-frames-postgres-tier
 
 jobs:
   build-push:
@@ -130,6 +135,36 @@ jobs:
             github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha,scope=fuzex-design-frames-service
           cache-to: type=gha,scope=fuzex-design-frames-service,mode=max
+
+      # The Postgres LIFECYCLE TIER (services/design-frames-service/backend/ +
+      # db/, docs/postgres-tier.md) — a SEPARATE image from the one above,
+      # built from the SAME Dockerfile's `postgres-tier` target, tagged with
+      # the SAME image_tag so both images move together on one release.
+      # Shared by BOTH the postgres-tier Deployment and the db-migrate Job
+      # (deploy/helm/fuzex/templates/), so this is the only extra image the
+      # tier needs.
+      #
+      # `identity` is an ADDITIONAL build context (not the primary `context`
+      # above): backend/package.json's local workspace dependency
+      # `@fuzex/identity` (`file:../../../packages/identity`) lives at the
+      # repo root, outside services/design-frames-service/ — see the
+      # Dockerfile's `identity-builder` stage comment for the full reasoning.
+      # Path is relative to this step's working directory (the repo root
+      # checkout), NOT to `context`.
+      - name: Build design-frames-service postgres-tier image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: ./services/design-frames-service
+          file: ./services/design-frames-service/Dockerfile
+          target: postgres-tier
+          build-contexts: |
+            identity=./packages/identity
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE_POSTGRES_TIER }}:${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_POSTGRES_TIER }}:latest
+          cache-from: type=gha,scope=fuzex-design-frames-postgres-tier
+          cache-to: type=gha,scope=fuzex-design-frames-postgres-tier,mode=max
 
   bump-prod-values:
     name: Bump prod image tag (GitOps release)
@@ -216,8 +251,16 @@ jobs:
           s, n = pat.subn(lambda m: m.group(1) + f'"{tag}"', s, count=1)
           if n != 1:
               raise SystemExit(f"FATAL: could not find the image tag line in {path} — refusing to release a half-bumped overlay")
+          # postgresTier's image.tag — matched via its own sentinel comment
+          # (not the `^image:` anchor above, which only matches the
+          # top-level, unindented image block) so this bump does not depend
+          # on postgresTier's indentation depth staying exactly as it is today.
+          pat2 = re.compile(r'(# POSTGRES_TIER_IMAGE_TAG.*\n(?:\s*#.*\n)*\s*tag:\s*)"?[^"\s]+"?', re.MULTILINE)
+          s, n2 = pat2.subn(lambda m: m.group(1) + f'"{tag}"', s, count=1)
+          if n2 != 1:
+              raise SystemExit(f"FATAL: could not find the POSTGRES_TIER_IMAGE_TAG line in {path} — refusing to release a half-bumped overlay")
           open(path, "w", encoding="utf-8", newline="\n").write(s)
-          print(f"bumped {path} -> {tag}")
+          print(f"bumped {path} -> {tag} (image.tag + postgresTier.image.tag)")
           PY
           git --no-pager diff -- deploy/helm/fuzex/values-prod.yaml
 

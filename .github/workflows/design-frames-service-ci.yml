@@ -68,3 +68,31 @@ jobs:
           curl -sf http://127.0.0.1:4400/apps/fuzex/remoteEntry.js | head -c 200
           docker logs dfs-smoke
           docker rm -f dfs-smoke
+
+      # Postgres LIFECYCLE TIER (services/design-frames-service/backend/ + db/,
+      # docs/postgres-tier.md) — a separate build target in the same
+      # Dockerfile (`postgres-tier`), smoke-checked separately from the
+      # vanilla image above. No DATABASE_URL is supplied here on purpose:
+      # backend/src/app.ts's /health route never touches the pg pool
+      # (backend/src/lib/db.ts connects lazily, on first query), so this
+      # proves the tier boots and serves without needing a live Postgres —
+      # that needs a real DATABASE_URL, which is FuzeInfra's to provision,
+      # never this repo's.
+      - name: Build design-frames-service postgres-tier image (no push — build-only smoke check)
+        run: |
+          docker buildx build \
+            --build-context identity=./packages/identity \
+            --target postgres-tier \
+            --load \
+            -t design-frames-postgres-tier:ci \
+            services/design-frames-service
+      - name: Smoke-check the postgres-tier image serves /health (no DATABASE_URL required)
+        run: |
+          docker run -d --name dfs-pg-smoke -p 4410:4410 design-frames-postgres-tier:ci
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:4410/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4410/health
+          docker logs dfs-pg-smoke
+          docker rm -f dfs-pg-smoke
