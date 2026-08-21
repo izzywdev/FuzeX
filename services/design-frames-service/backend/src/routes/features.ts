@@ -13,6 +13,7 @@ import * as featureRepo from '../repositories/featureRepo';
 import * as flowRepo from '../repositories/flowRepo';
 import * as approvalRepo from '../repositories/approvalRepo';
 import * as projectRepo from '../repositories/projectRepo';
+import * as frameRefRepo from '../repositories/frameRefRepo';
 import { ConflictError, StampConflictError, ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
@@ -61,9 +62,17 @@ featuresRouter.post('/', async (req, res) => {
     await projectRepo.getProject(projectRefId, log(req));
   }
 
+  // openapi.yaml's feature-create body requires ONLY `slug`; `description`
+  // is optional. lib/schema.js's validateManifest, however, requires the
+  // manifest's `description` to be a non-empty string (never modify that
+  // shared schema per docs/postgres-tier.md — fix the gap here instead): an
+  // omitted description must still produce a valid, non-empty manifest
+  // field. Fall back to the feature name (itself defaulted to the slug just
+  // above), rather than synthesizing '' which fails that validation.
+  const resolvedName = (name as string) || slug;
   const manifest = {
-    name: (name as string) || slug,
-    description: (description as string) || '',
+    name: resolvedName,
+    description: (description as string) || resolvedName,
     designSystem: (designSystem as string) || 'fuse-seam (@fuzefront/design-system)',
     entry: (entry as string) || 'index.html',
     sourceRepo: (sourceRepo as string | null) || null,
@@ -117,6 +126,30 @@ featuresRouter.post('/:slug/stamp', async (req, res) => {
   const feature = await fileStore.getFeature(req.params.slug);
   const stamp = computeStamp(feature);
   await fileStore.setStamp(req.params.slug, stamp);
+
+  // Index a frame_ref row per ACTUAL frame file at this stamp, so `frame`/
+  // `element` discussion targets (DiscussionTargetType, docs/postgres-tier.md)
+  // are discoverable via the live API rather than only via the out-of-band
+  // scripts/backfill.ts (see repositories/frameRefRepo.ts). Sourced from
+  // `feature.frames` (the real files on disk, per lib/store.js#getFeature —
+  // the same set computeStamp() just hashed above) rather than
+  // `manifest.frames`: a frame written via PUT .../frames/:file never
+  // requires the manifest to separately declare it, so keying off the
+  // manifest array would miss exactly the case this fix targets.
+  const featureRow = await featureRepo.findOrCreateFeatureBySlug(req.params.slug, log(req));
+  const manifest = feature.manifest as {
+    frames?: Array<{ file: string; flow?: string }>;
+    build?: { flows?: Array<{ id: string }> };
+  };
+  const flowIdByKey = new Map<string, string>();
+  for (const flowDecl of manifest.build?.flows ?? []) {
+    const flowRow = await flowRepo.findOrCreateFlow(featureRow.id, flowDecl.id, log(req));
+    flowIdByKey.set(flowDecl.id, flowRow.id);
+  }
+  const flowByFile = new Map((manifest.frames ?? []).map((f) => [f.file, f.flow]));
+  const actualFrames = Array.from(feature.frames.keys()).map((file) => ({ file, flow: flowByFile.get(file) }));
+  await frameRefRepo.indexFrameRefsFromManifest(featureRow.id, actualFrames, flowIdByKey, stamp, log(req));
+
   res.status(200).json({ slug: req.params.slug, stamp });
 });
 
@@ -148,6 +181,16 @@ featuresRouter.post('/:slug/flows/:flowId/approve', async (req, res) => {
   const { slug } = req.params;
   const flowKey = decodeURIComponent(req.params.flowId);
   const body = (req.body ?? {}) as Record<string, unknown>;
+  // openapi.yaml's approve body is additionalProperties:false ({ approvedBy,
+  // actorType?, contentStamp? }) — reject anything else, mirroring
+  // routes/projects.ts's create/patch handlers.
+  const allowed = new Set(['approvedBy', 'actorType', 'contentStamp']);
+  const unknown = Object.keys(body).filter((k) => !allowed.has(k));
+  if (unknown.length) {
+    throw new ValidationError('invalid approve body', [
+      `unexpected propert${unknown.length === 1 ? 'y' : 'ies'}: ${unknown.join(', ')}`,
+    ]);
+  }
   if (typeof body.approvedBy !== 'string' || body.approvedBy.length === 0) {
     throw new ValidationError('approvedBy is required');
   }
@@ -186,6 +229,16 @@ featuresRouter.post('/:slug/flows/:flowId/reject', async (req, res) => {
   const { slug } = req.params;
   const flowKey = decodeURIComponent(req.params.flowId);
   const body = (req.body ?? {}) as Record<string, unknown>;
+  // openapi.yaml's reject body is additionalProperties:false ({ reason,
+  // rejectedBy?, actorType?, contentStamp? }) — reject anything else,
+  // mirroring routes/projects.ts's create/patch handlers.
+  const allowed = new Set(['reason', 'rejectedBy', 'actorType', 'contentStamp']);
+  const unknown = Object.keys(body).filter((k) => !allowed.has(k));
+  if (unknown.length) {
+    throw new ValidationError('invalid reject body', [
+      `unexpected propert${unknown.length === 1 ? 'y' : 'ies'}: ${unknown.join(', ')}`,
+    ]);
+  }
   if (typeof body.reason !== 'string' || body.reason.trim().length === 0) {
     throw new ValidationError('reason is required');
   }

@@ -20,6 +20,14 @@ export interface DiscussionRow {
   updated_at: Date;
 }
 
+/** `DiscussionRow` plus the full microsecond-precision text rendering of
+ * `created_at`, used ONLY for the pagination cursor (see projectRepo.ts for
+ * why: `pg` parses timestamptz into a millisecond JS Date, losing the
+ * microsecond precision Postgres actually stores it at). */
+interface DiscussionCursorRow extends DiscussionRow {
+  cursor_ts: string;
+}
+
 export interface DiscussionDTO {
   id: EntityId<'discussion'>;
   targetType: DiscussionTargetType;
@@ -103,11 +111,14 @@ export async function listByTarget(
   if (page.cursor) {
     const { v, id } = decodeCursor(page.cursor);
     params.push(v, toUuid(id as EntityId<'discussion'>));
-    extraWhere += ` and (created_at, id) > ($${params.length - 1}, $${params.length})`;
+    // Explicit ::timestamptz cast — the cursor's `v` carries FULL
+    // microsecond precision (see cursor_ts below), so bind it back at that
+    // same precision rather than relying on an implicit/ambiguous cast.
+    extraWhere += ` and (created_at, id) > ($${params.length - 1}::timestamptz, $${params.length})`;
   }
   params.push(page.limit + 1);
-  const { rows } = await query<DiscussionRow>(
-    `select * from design_frames.discussion where target_type = $1 and target_ref = $2${extraWhere}
+  const { rows } = await query<DiscussionCursorRow>(
+    `select *, created_at::text as cursor_ts from design_frames.discussion where target_type = $1 and target_ref = $2${extraWhere}
      order by created_at asc, id asc limit $${params.length}`,
     params,
     log
@@ -116,6 +127,6 @@ export async function listByTarget(
     rows,
     page.limit,
     (row) => row,
-    (row) => ({ v: row.created_at.toISOString(), id: fromUuid('discussion', row.id) })
+    (row) => ({ v: row.cursor_ts, id: fromUuid('discussion', row.id) })
   );
 }
