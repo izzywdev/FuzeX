@@ -1,0 +1,18 @@
+{{- if and .Values.enabled .Values.postgresTier.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fuzex.fullname" . }}-postgres-tier
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-tier
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "fuzex.pgTierSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.postgresTier.service.port }}
+      targetPort: http
+{{- end }}
