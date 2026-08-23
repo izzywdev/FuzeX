@@ -58,7 +58,14 @@ function denullify(node) {
 const doc = JSON.parse(JSON.stringify(rawDoc));
 denullify(doc);
 
-const ajv = new Ajv({ strict: false, allErrors: true });
+// allErrors: false (the default) — Ajv stops at the first schema violation
+// instead of collecting every one. This suite only asserts *whether* a
+// response matches its schema (assertMatchesSchema throws on the first
+// mismatch either way); it never depends on the full multi-error list, so
+// there is no behavioural loss. `allErrors: true` also disables Ajv's
+// short-circuiting optimizations, which is the standing
+// `ajv-allerrors-true` Semgrep finding this clears.
+const ajv = new Ajv({ strict: false });
 addFormats(ajv);
 
 // Register the whole (denullified) document as the schema root so `$ref:
