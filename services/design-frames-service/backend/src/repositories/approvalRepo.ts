@@ -22,6 +22,14 @@ export interface ApprovalRow {
   decided_at: Date;
 }
 
+/** `ApprovalRow` plus the full microsecond-precision text rendering of
+ * `decided_at`, used ONLY for the pagination cursor (see projectRepo.ts for
+ * why: `pg` parses timestamptz into a millisecond JS Date, losing the
+ * microsecond precision Postgres actually stores it at). */
+interface ApprovalCursorRow extends ApprovalRow {
+  cursor_ts: string;
+}
+
 export interface ApprovalDTO {
   id: EntityId<'approval'>;
   slug: string;
@@ -106,11 +114,14 @@ export async function listApprovals(
   if (page.cursor) {
     const { v, id } = decodeCursor(page.cursor);
     params.push(v, toUuid(id as EntityId<'approval'>));
-    extraWhere = ` and (decided_at, id) < ($2, $3)`; // newest-first: strictly older than the cursor row
+    // Explicit ::timestamptz cast — the cursor's `v` carries FULL
+    // microsecond precision (see cursor_ts below), so bind it back at that
+    // same precision rather than relying on an implicit/ambiguous cast.
+    extraWhere = ` and (decided_at, id) < ($2::timestamptz, $3)`; // newest-first: strictly older than the cursor row
   }
   params.push(page.limit + 1);
-  const { rows } = await query<ApprovalRow>(
-    `select * from design_frames.approval where flow_id = $1${extraWhere}
+  const { rows } = await query<ApprovalCursorRow>(
+    `select *, decided_at::text as cursor_ts from design_frames.approval where flow_id = $1${extraWhere}
      order by decided_at desc, id desc limit $${params.length}`,
     params,
     log
@@ -119,6 +130,6 @@ export async function listApprovals(
     rows,
     page.limit,
     (row) => toApprovalDTO(row, slug, flowKey),
-    (row) => ({ v: row.decided_at.toISOString(), id: fromUuid('approval', row.id) })
+    (row) => ({ v: row.cursor_ts, id: fromUuid('approval', row.id) })
   );
 }

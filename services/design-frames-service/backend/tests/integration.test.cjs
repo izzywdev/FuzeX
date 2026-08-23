@@ -317,16 +317,17 @@ test('POST /api/v1/discussions on a project works end to end, then comments thre
   assert.equal(created.body.resolved, false);
   discussionId = created.body.id;
 
+  // authorRef is NOT part of CommentCreate (openapi.yaml additionalProperties:
+  // false) and is now server-derived, never client-supplied — see
+  // routes/discussions.ts resolveActor().
   const comment1 = await j('POST', `/api/v1/discussions/${discussionId}/comments`, {
     body: 'why this name?',
-    authorRef: 'dave@example.com',
   });
   assert.equal(comment1.status, 201);
   assert.match(comment1.body.id, /^fxdf_cmt_/);
 
   const comment2 = await j('POST', `/api/v1/discussions/${discussionId}/comments`, {
     body: 'because reasons',
-    authorRef: 'erin@example.com',
     parentCommentId: comment1.body.id,
   });
   assert.equal(comment2.status, 201);
