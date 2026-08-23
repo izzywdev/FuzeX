@@ -52,6 +52,10 @@ try {
 test.before(async () => {
   srv = await bootServer();
   http = client(srv.baseUrl, srv.token);
+  // bootServer() now provisions a private, per-file ephemeral database (see
+  // lib/server.cjs) instead of truncating the shared one — direct SQL below
+  // must target THAT database, not the base DATABASE_URL captured above.
+  databaseUrl = srv.databaseUrl;
 });
 
 test.after(async () => {
