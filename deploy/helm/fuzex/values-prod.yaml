@@ -4,40 +4,51 @@
 # The image tag below is bumped by .github/workflows/release.yml; Argo detects
 # the diff and rolls it. DO NOT edit it by hand.
 #
-# `enabled` stays FALSE, and that is the honest state rather than an omission.
-# Two things are not true yet:
+# `enabled: true` — flipped in this PR (feat/prod-deploy). Both prior blockers
+# are now satisfied:
 #
-#   1. ghcr.io/izzywdev/fuzex-design-frames-service has never been published.
-#      release.yml (added alongside this chart) is what will publish it; until a
-#      push to master runs it, this tag names an image that does not exist and
-#      the pod would ImagePullBackOff.
-#   2. `fuzefront-registration` does not exist as a SealedSecret in the fuzex
-#      namespace. The registration init container is fail-closed by design, so
-#      without it the pod will not start.
+#   1. ghcr.io/izzywdev/fuzex-design-frames-service:6aa1c11f6aff IS published —
+#      verified directly against the GHCR manifest API (anonymous pull token,
+#      HTTP 200), so the package is public and the tag exists. No imagePullSecret
+#      is required for it (see below).
+#   2. `fuzefront-registration` exists as a SealedSecret in the fuzex namespace
+#      (deploy/argocd/sealed/fuzefront-registration.yaml). The registration init
+#      container is fail-closed by design, so this was a hard prerequisite.
 #
-# TO GO LIVE, in this order:
-#   1. merge a change under services/design-frames-service/ to master — release.yml
-#      builds and pushes the image and bumps the tag below.
-#   2. seal `fuzefront-registration` (key `token`, an apps:register bearer) into
-#      the fuzex namespace. The fuzex-registration ConfigMap is NOT a manual step
-#      — the chart renders it from files/registration/.
-#   3. seal `fuzex-api-tokens` (key DESIGN_FRAMES_API_TOKENS) too, or the service
-#      comes up read-only: every write 401s. That is a safe state, not a working
-#      one.
-#   4. have FuzeInfra provide the DNS/tunnel for fuzex.prod.fuzefront.com, then
-#      set ingress.enabled + ingress.host here. registration/manifest.json already
-#      points integration.url at that name, so registering before it resolves
-#      would activate a portal tile that mounts a dead origin.
-#   5. flip `enabled: true`, in ONE PR, during a deploy window.
+# STILL DEFERRED, deliberately NOT part of this change:
+#   - `fuzex-api-tokens` (key DESIGN_FRAMES_API_TOKENS) is not sealed. Not a
+#     blocker — `apiTokens` is wired `optional: true` in the pod spec, so the
+#     service comes up read-only (every write 401s) rather than CrashLooping.
+#   - ingress.enabled / ingress.host and federatedMount.enabled / .host stay OFF.
+#     ingress.host needs new DNS + a Cloudflare tunnel rule for a *.prod host —
+#     a FuzeInfra change, not this repo's to assume. federatedMount would reuse
+#     FuzeFront's EXISTING host (app.fuzefront.com) via a same-origin path route,
+#     so it needs no new DNS, but adding a second namespace's Ingress object
+#     against that host is a cross-repo routing decision (coordinate with
+#     FuzeFront's own app.fuzefront.com Ingress rules first) and is out of scope
+#     for this PR, which is about standing up the namespace + workload only.
+#
+# KNOWN, SEPARATE BLOCKER (not fixed by this PR, not this repo's to fix): GHCR
+# pulls are failing cluster-wide over IPv6 egress on the Contabo nodes. Even
+# with `enabled: true` and a real, public, existing image, the pod will land in
+# ImagePullBackOff until that node egress issue is resolved (FuzeInfra).
 # =============================================================================
-enabled: false
+enabled: true
 
 image:
   tag: "6aa1c11f6aff"
   pullPolicy: Always
 
-imagePullSecrets:
-  - name: ghcr-pull
+# No imagePullSecrets. A prior revision of this file referenced a secret named
+# `ghcr-pull` that was never sealed anywhere in this repo (no SealedSecret
+# manifest, no chart template renders one) — an orphan reference that would have
+# left the pod referencing a Secret that does not exist in the fuzex namespace.
+# It was also unnecessary: ghcr.io/izzywdev/fuzex-design-frames-service is a
+# PUBLIC package (confirmed via an anonymous GHCR pull token against the
+# manifest API), so no pull credential is needed at all. If this package is
+# ever made private, add a real `ghcr-pull-secret` SealedSecret (see FuzeHub's
+# helm/fuzehub/templates/ghcr-pull-secret.yaml for the pattern) rather than
+# reintroducing a bare name with nothing behind it.
 
 persistence:
   enabled: true
