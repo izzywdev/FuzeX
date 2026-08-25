@@ -284,8 +284,18 @@ jobs:
           fi
 
           BRANCH="release/bump-fuzex-${TAG}"
+          REPO="${{ github.repository }}"
+          OWNER="${REPO%%/*}"
 
-          existing_pr=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          # `gh pr list` / `gh pr create` route through gh's GraphQL API for
+          # repository/PR resolution, and this identity has repeatedly hit
+          # "GraphQL: API rate limit already exceeded for user ID ..." here
+          # (run #32632618648) — the same account pushes releases across the
+          # whole fleet, so its GraphQL quota is shared and easy to exhaust.
+          # `gh api` talks plain REST instead, which has its own, much larger
+          # quota, so every call below is REST: `gh pr list --head` becomes a
+          # filtered GET on /pulls, and `gh pr create` becomes a POST.
+          existing_pr=$(gh api "repos/${REPO}/pulls?head=${OWNER}:${BRANCH}&state=open" --jq '.[0].number // empty')
           if [ -n "$existing_pr" ]; then
             echo "PR #$existing_pr already open for $BRANCH — nothing to do."
             exit 0
@@ -300,16 +310,7 @@ jobs:
           # above (token: GH_RELEASE_PAT || GITHUB_TOKEN), so a plain push works.
           git push origin "HEAD:refs/heads/${BRANCH}"
 
-          # FAIL-LOUD: no `|| true`, no swallowed exit code. If the PR cannot be
-          # created (bad token, branch already merged and diverged, API error),
-          # this step — and the job — fails rather than silently leaving prod
-          # pinned to the old tag with no PR to fix it, which is exactly the
-          # failure mode this rewrite exists to close.
-          gh pr create --repo "${{ github.repository }}" \
-            --base master --head "$BRANCH" \
-            --title "chore(release): bump fuzex prod image tag to ${TAG}" \
-            --label auto-merge \
-            --body "$(cat <<BODY
+          PR_BODY="$(cat <<BODY
           Automated GitOps release bump. \`services/design-frames-service\` built and
           pushed \`ghcr.io/izzywdev/fuzex-design-frames-service:${TAG}\` from
           ${{ github.sha }}; Argo syncs \`deploy/helm/fuzex/values-prod.yaml\` once this
@@ -323,9 +324,24 @@ jobs:
           \`enabled\` and \`ingress.*\` are untouched here — the go-live switch is a
           separate, deliberately reviewed PR, never bundled with a routine tag bump.
 
-          Labeled \`auto-merge\`. Note this repo has \`hardening.deployOnPush: true\`,
-          so \`auto-merge.yml\` will NOT auto-merge this — it must be merged by a human
-          in a deploy window, same as any other change here.
+          Note this repo has \`hardening.deployOnPush: true\`, so \`auto-merge.yml\`
+          will NOT auto-merge this — it must be merged by a human in a deploy
+          window, same as any other change here.
           BODY
           )"
-          echo "Opened tag-bump PR for ${TAG} on branch ${BRANCH}."
+
+          # FAIL-LOUD: no `|| true`, no swallowed exit code. If the PR cannot be
+          # created (bad token, branch already merged and diverged, API error),
+          # this step — and the job — fails rather than silently leaving prod
+          # pinned to the old tag with no PR to fix it, which is exactly the
+          # failure mode this rewrite exists to close.
+          PR_NUMBER=$(gh api "repos/${REPO}/pulls" \
+            -f title="chore(release): bump fuzex prod image tag to ${TAG}" \
+            -f head="${BRANCH}" \
+            -f base="master" \
+            -f body="${PR_BODY}" \
+            --jq '.number')
+          # Labeling is a separate REST call (issues API) rather than
+          # `--label` on `gh pr create`, for the same GraphQL-avoidance reason.
+          gh api "repos/${REPO}/issues/${PR_NUMBER}/labels" -f "labels[]=auto-merge" >/dev/null
+          echo "Opened tag-bump PR #${PR_NUMBER} for ${TAG} on branch ${BRANCH}."
