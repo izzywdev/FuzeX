@@ -1,0 +1,82 @@
+{{- if and .Values.enabled .Values.webappMfe.enabled }}
+{{/*
+webapp-mfe — the Module-Federation remote FuzeFront's portal shell imports at
+/apps/fuzex/, served by the family-standard nginx-serving stage (Dockerfile's
+`webapp-mfe` target, ../../../services/design-frames-service/webapp/nginx.conf).
+
+A SEPARATE Deployment from the `design-frames-service` one in deployment.yaml:
+that pod is the REST API + the public /site review surface (stateful, single
+writer — see deployment.yaml's own comment for why it is Recreate/replicas:1).
+This pod is stateless static-asset serving and can roll normally.
+
+Before this template existed, the Module-Federation remote was served BY
+server.js itself (a hand-rolled static-file route) — the one deviation in the
+family from the nginx-serving-stage standard every other MF remote uses
+(FuzeAgent, FuzeBI's frontend-mfe, FuzeService, FuzeContact, FuzeSales, ...),
+and the reason the federation gate's layer-4 (nginx conf) extractor could not
+read this repo. See templates/federated-mount-ingress.yaml for the Ingress
+half of this migration — it now routes /apps/fuzex/* to THIS Service, not to
+design-frames-service's.
+
+Selector is disjoint from design-frames-service's and postgres-tier's
+(fuzex.webappMfeSelectorLabels, own component label) — a Deployment's
+selector is immutable, so a new pod's labels are what moves, never an
+existing Service's selector.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fuzex.fullname" . }}-webapp-mfe
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webapp-mfe
+spec:
+  replicas: {{ .Values.webappMfe.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "fuzex.webappMfeSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fuzex.webappMfeSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: webapp-mfe
+          image: "{{ .Values.webappMfe.image.repository }}:{{ .Values.webappMfe.image.tag }}"
+          imagePullPolicy: {{ .Values.webappMfe.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.webappMfe.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fuzex.fullname" . }}-webapp-mfe
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webapp-mfe
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "fuzex.webappMfeSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.webappMfe.service.port }}
+      targetPort: http
+{{- end }}

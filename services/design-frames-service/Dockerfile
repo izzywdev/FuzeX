@@ -1,13 +1,24 @@
-# design-frames-service — two build inputs now:
-#   1. the service itself (vanilla JS, no bundler, no build step)
+# design-frames-service — two build inputs, now three published images:
+#   1. the service itself (vanilla JS, no bundler, no build step) — the
+#      `vanilla` stage below. REST API + the /site review surface only.
 #   2. webapp/ — a Vite/React Module-Federation remote (scope "fuzex", exposes
-#      ./DesignFramesApp) that DOES need a build step. Stage 1 builds it to
-#      dist/ and stage 2 copies the built assets in; server.js serves them at
-#      /apps/fuzex/ (see the DESIGN_FRAMES_WEBAPP_DIR route).
+#      ./DesignFramesApp) that DOES need a build step, built once here
+#      (`webapp-builder`) and consumed by the `webapp-mfe` stage below.
+#
+# webapp/'s remote used to be served BY server.js itself
+# (DESIGN_FRAMES_WEBAPP_DIR route, `serveWebappAsset`) — a Node/Express-style
+# static-file serving stage, the one deviation in the family from the
+# nginx-serving-stage standard every other MF remote uses (FuzeAgent,
+# FuzeBI's frontend-mfe, FuzeService, FuzeContact, FuzeSales, ...). That
+# deviation is why the federation gate's layer-4 (nginx conf) extractor could
+# not read this repo and carved it out of enforcement. Migrated here: the
+# `webapp-mfe` stage below is the family-standard nginx:alpine image, and
+# server.js no longer serves /apps/fuzex/ at all (removed, not left as dead
+# code the two serving paths could drift against).
 #
 # webapp/'s own package.json/.nvmrc pin Node >=24 (the family's MF-remote
 # toolchain floor — see FuzeFront CLAUDE.md "Toolchain baseline"), so the
-# builder stage uses node:24-alpine regardless of the runtime stage's line.
+# builder stage uses node:24-alpine regardless of the vanilla stage's line.
 #
 # webapp/'s dependency on the private @izzywdev/fuzefront-design-system
 # (GitHub Packages) needs a read:packages token at `npm install` time.
@@ -22,6 +33,32 @@ RUN --mount=type=secret,id=github_token \
     npm install --no-audit --no-fund
 COPY webapp/ ./
 RUN npm run build
+
+# ---------------------------------------------------------------------------
+# webapp-mfe — the family-standard nginx-serving stage for the
+# Module-Federation remote. NOT the default build target: `docker build .`
+# with no `--target` still produces only the unchanged `vanilla` image at the
+# bottom of this file (this stage is unreferenced by it, so BuildKit never
+# even builds it); producing this image requires `--target webapp-mfe`
+# (wired in design-frames-service-ci.yml / release.yml), mirroring how
+# `postgres-tier` below is opted into.
+#
+# webapp/vite.config.ts sets `base: '/apps/fuzex/'` and `assetsDir: ''`, so
+# the build emits remoteEntry.js and every chunk flat at the root of dist/ —
+# so, matching FuzeAgent's and FuzeBI's frontend-mfe images, the FLAT build
+# output is copied straight to the nginx docroot and webapp/nginx.conf
+# aliases the /apps/fuzex/ URL prefix back onto it (see nginx.conf's comment
+# for why this must be `alias`, not a nested output directory — the two must
+# agree or requests 404 behind a 200 remoteEntry.js).
+FROM nginx:alpine AS webapp-mfe
+COPY webapp/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=webapp-builder /webapp/dist /usr/share/nginx/html
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
 
 # ---------------------------------------------------------------------------
 # Postgres LIFECYCLE TIER (services/design-frames-service/backend/ +
@@ -134,19 +171,19 @@ CMD ["node", "backend/dist/index.js"]
 # itself needs no Node 24 feature, only the webapp build tooling does, and
 # that's isolated to the builder stage above. Bumping the runtime line is a
 # separate, repo-wide toolchain decision, not bundled into this change.
+#
+# No longer copies webapp-builder's output: the Module-Federation remote is
+# served by the `webapp-mfe` (nginx) image above now, not by this process.
+# This stage is REST API + the public /site review surface only.
 FROM node:20-alpine
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund || true
 COPY . .
-# Built Module-Federation remote (webapp/'s dist/) — served at /apps/fuzex/ by
-# server.js's DESIGN_FRAMES_WEBAPP_DIR route, same-origin, no CORS needed.
-COPY --from=webapp-builder /webapp/dist ./webapp-dist
 
 ENV DESIGN_FRAMES_HOST=0.0.0.0
 ENV DESIGN_FRAMES_PORT=4400
 ENV DESIGN_FRAMES_DATA_DIR=/data/features
-ENV DESIGN_FRAMES_WEBAPP_DIR=/app/webapp-dist
 RUN mkdir -p /data/features && chown -R node:node /data/features /app
 VOLUME ["/data/features"]
 
