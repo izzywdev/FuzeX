@@ -51,7 +51,10 @@ spec:
           imagePullPolicy: {{ .Values.webappMfe.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              # 8080: the image is nginxinc/nginx-unprivileged (uid 101), which
+              # cannot bind :80. Matches EXPOSE and `listen` in the Dockerfile
+              # and webapp/nginx.conf respectively -- all three move together.
+              containerPort: 8080
           readinessProbe:
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 3

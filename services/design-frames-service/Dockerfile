@@ -50,14 +50,27 @@ RUN npm run build
 # aliases the /apps/fuzex/ URL prefix back onto it (see nginx.conf's comment
 # for why this must be `alias`, not a nested output directory — the two must
 # agree or requests 404 behind a 200 remoteEntry.js).
-FROM nginx:alpine AS webapp-mfe
+# nginx-unprivileged, NOT nginx:alpine. The stock image runs its master process
+# as root, which Semgrep's dockerfile.security.missing-user flags as an error --
+# correctly: a compromise of the process is then a compromise of the container.
+#
+# `USER nginx` alone on the stock image does not work and would ship a broken
+# container: an unprivileged process cannot bind :80, and cannot write
+# /var/run/nginx.pid or /var/cache/nginx. The unprivileged image is built for
+# this -- it runs as uid 101 and listens on 8080 -- so the port moves with it,
+# here and in deploy/helm/fuzex/templates/webapp-mfe.yaml. Those two must agree.
+FROM nginxinc/nginx-unprivileged:alpine AS webapp-mfe
 COPY webapp/nginx.conf /etc/nginx/conf.d/default.conf
+# NOT under conf.d/: the base image auto-includes conf.d/*.conf inside the
+# http block, so a snippet there would be applied globally AND again at each
+# explicit include below -- emitting every header twice.
+COPY webapp/common-headers.conf /etc/nginx/common-headers.conf
 COPY --from=webapp-builder /webapp/dist /usr/share/nginx/html
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1
 
-EXPOSE 80
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]
 
 # ---------------------------------------------------------------------------
