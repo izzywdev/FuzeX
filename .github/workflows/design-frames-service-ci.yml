@@ -129,7 +129,13 @@ jobs:
             services/design-frames-service
       - name: Smoke-check webapp-mfe serves /health and the MF remote at /apps/fuzex/
         run: |
-          docker run -d --name dfs-webapp-mfe-smoke -p 4401:80 design-frames-webapp-mfe:ci
+          # Container port 8080, not 80: the webapp-mfe stage runs on
+          # nginxinc/nginx-unprivileged (uid 101), which cannot bind a
+          # privileged port. This is the FOURTH place that port is written
+          # down -- Dockerfile EXPOSE/HEALTHCHECK, nginx.conf `listen`, the
+          # chart's containerPort, and here. Missing this one is what made
+          # this smoke test fail while the other three already agreed.
+          docker run -d --name dfs-webapp-mfe-smoke -p 4401:8080 design-frames-webapp-mfe:ci
           ok=
           for i in $(seq 1 20); do
             curl -sf http://127.0.0.1:4401/health && { ok=1; break; }

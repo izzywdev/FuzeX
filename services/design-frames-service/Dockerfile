@@ -70,6 +70,13 @@ COPY --from=webapp-builder /webapp/dist /usr/share/nginx/html
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1
 
+# Explicit, though nginxinc/nginx-unprivileged already runs as this uid.
+# Semgrep's dockerfile.security.missing-user reads THIS file, not the base
+# image metadata, so without the line the invariant is invisible to it --
+# and more importantly invisible to a future edit that swaps the base back
+# to nginx:alpine and silently restores root.
+USER 101
+
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]
 
