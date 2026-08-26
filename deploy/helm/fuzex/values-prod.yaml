@@ -36,7 +36,7 @@
 enabled: true
 
 image:
-  tag: "6aa1c11f6aff"
+  tag: "6c919b4ee4e0"
   pullPolicy: Always
 
 # No imagePullSecrets. A prior revision of this file referenced a secret named
@@ -74,7 +74,7 @@ postgresTier:
   image:
     # POSTGRES_TIER_IMAGE_TAG — bumped by release.yml's postgres-tier build
     # job the same way image.tag above is bumped. DO NOT edit by hand.
-    tag: "0.1.0"
+    tag: "6c919b4ee4e0"
     pullPolicy: Always
 
 # Same-origin portal mount. WITHOUT THIS THE APP CANNOT LOAD IN THE PORTAL:
