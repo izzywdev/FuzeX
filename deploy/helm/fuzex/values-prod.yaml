@@ -76,3 +76,14 @@ postgresTier:
     # job the same way image.tag above is bumped. DO NOT edit by hand.
     tag: "0.1.0"
     pullPolicy: Always
+
+# Same-origin portal mount. WITHOUT THIS THE APP CANNOT LOAD IN THE PORTAL:
+# federatedMount.enabled defaults to false in values.yaml, so production had no
+# /apps/<slug> Ingress at all and the browser fell through to the FuzeFront
+# shell's SPA fallback — a 404, or a 200 serving the shell's own index.html.
+# Measured across the fleet 2026-08-26: 11 of 17 products were unmounted for
+# exactly this reason. The host resolves integration.remoteEntry against its own
+# origin, so this path must match registration/manifest.json.
+federatedMount:
+  enabled: true
+  host: app.fuzefront.com
