@@ -79,5 +79,9 @@
     "dockerBaseImage": "node:24-alpine",
     "ciNodeVersion": "24.x",
     "enforce": false
+  },
+  "identity": {
+    "namespace": "fxdf",
+    "note": "Declared together with packages/identity/ (governance/identifier-standard.md #2 — each repo keeps its own registry). design-frames-service's Postgres lifecycle tier (services/design-frames-service/docs/postgres-tier.md) mints project/feature/flow/frameRef/approval/discussion/comment ids under this namespace. @izzywdev/fuzefront-identity was checked first: it 401'd under this session's GITHUB_TOKEN scope, and independent of that its ENTITY_PREFIXES registry is a closed literal that cannot be extended from a consuming repo — which the standard says is expected (each repo's own registry, not a central one), so packages/identity/ is the intended permanent home, not a stopgap."
   }
 }

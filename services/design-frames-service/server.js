@@ -38,57 +38,15 @@ const STATIC_FILES = {
   '/styles.css': { file: 'styles.css', type: 'text/css; charset=utf-8' },
 };
 
-// ─── Module-Federation remote: webapp/'s built assets, served same-origin ───
-// webapp/ (vite.config.ts) builds to dist/ with `base: '/apps/fuzex/'` and
-// `assetsDir: ''`, so remoteEntry.js and every chunk land flat in dist/ and
-// are expected at .../apps/fuzex/<file>. The Dockerfile builds webapp/ in a
-// separate stage and copies dist/ to /app/webapp-dist by default;
-// DESIGN_FRAMES_WEBAPP_DIR overrides that (e.g. for a local `npm run build`
-// in webapp/ without rebuilding the image, or a chart-level override).
-const WEBAPP_DIR = process.env.DESIGN_FRAMES_WEBAPP_DIR || path.join(__dirname, 'webapp-dist');
-const WEBAPP_MOUNT_PREFIX = '/apps/fuzex/';
-const WEBAPP_MIME_TYPES = {
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.html': 'text/html; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-};
-
-async function serveWebappAsset(res, relPath) {
-  // Empty (mount root, e.g. GET /apps/fuzex/) serves the SPA entry document.
-  const rel = relPath === '' ? 'index.html' : relPath;
-  const webappRoot = path.normalize(WEBAPP_DIR + path.sep);
-  const resolved = path.normalize(path.join(WEBAPP_DIR, rel));
-  // Defense in depth against a decoded `..` escaping WEBAPP_DIR: the router
-  // match below already requires the RAW (still percent-encoded) pathname to
-  // start with /apps/fuzex/, but relPath is decodeURIComponent'd after that
-  // match, so an encoded traversal segment (`%2e%2e%2f`) only reveals itself
-  // here.
-  if (resolved !== path.normalize(WEBAPP_DIR) && !resolved.startsWith(webappRoot)) {
-    return sendJson(res, 400, { error: 'invalid path' });
-  }
-  let data;
-  try {
-    data = await fs.readFile(resolved);
-  } catch (err) {
-    if (err.code === 'ENOENT' || err.code === 'EISDIR') {
-      return sendJson(res, 404, { error: 'not found' });
-    }
-    throw err;
-  }
-  const ext = path.extname(resolved).toLowerCase();
-  const type = WEBAPP_MIME_TYPES[ext] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length });
-  res.end(data);
-}
-
+// ─── Module-Federation remote ───
+// Previously served here (webapp/'s built dist/, mounted at /apps/fuzex/) by
+// a hand-rolled static-file route — the Node/Express-style serving stage
+// that deviated from the family's nginx-serving-stage standard and left the
+// federation gate's layer-4 (nginx conf) extractor unable to read this repo.
+// Migrated to the `webapp-mfe` nginx:alpine image (Dockerfile, webapp/nginx.conf,
+// deploy/helm/fuzex/templates/webapp-mfe.yaml) — this process no longer
+// serves it, so there is exactly one place that can drift from the vite
+// `base`/`assetsDir` contract, not two.
 const BIND_HOST = process.env.DESIGN_FRAMES_HOST || '0.0.0.0';
 const PORT = parseInt(process.env.DESIGN_FRAMES_PORT, 10) || 4400;
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — frame HTML is bigger than an MCP tool call
@@ -266,16 +224,6 @@ async function handleRequest(req, res) {
       res.writeHead(200, { 'Content-Type': spec.type });
       res.end(contents);
       return;
-    }
-
-    // ─── Module-Federation remote (webapp/'s built dist/), public/no auth ───
-    // Mirrors the /site read surface: this is a review-time app tile, not a
-    // write path, so it needs no bearer token. Matched on the RAW (still
-    // percent-encoded) pathname so a `..` segment can't be smuggled past this
-    // prefix check via encoding (see serveWebappAsset's second check).
-    if (req.method === 'GET' && (url.pathname === '/apps/fuzex' || url.pathname.startsWith(WEBAPP_MOUNT_PREFIX))) {
-      const rel = url.pathname === '/apps/fuzex' ? '' : url.pathname.slice(WEBAPP_MOUNT_PREFIX.length);
-      return serveWebappAsset(res, decodeURIComponent(rel));
     }
 
     // ─── Public read-only "site" (design-review surface, no auth — see header note) ───
