@@ -77,13 +77,37 @@ resources:
   requests: { cpu: 25m, memory: 64Mi }
   limits: { cpu: 500m, memory: 512Mi }
 
-# -- Module-Federation remote (webapp/'s built dist/), served at /apps/fuzex/.
-# Empty = trust the image's own ENV DESIGN_FRAMES_WEBAPP_DIR (set in the
-# Dockerfile to /app/webapp-dist, where the builder stage's COPY --from
-# lands it). Only set this if a deployment needs to point at a path the
-# image itself didn't bake the assets into — there is no such case today.
-webapp:
-  dir: ""
+# -- webappMfe: the Module-Federation remote (webapp/'s built dist/), served
+# at /apps/fuzex/ by the family-standard nginx-serving stage (Dockerfile's
+# `webapp-mfe` target, ../../../services/design-frames-service/webapp/
+# nginx.conf) — templates/webapp-mfe.yaml. A SEPARATE Deployment + Service
+# from the design-frames-service one above: that pod is the REST API + the
+# public /site surface; this one is stateless static-asset serving and can
+# roll normally (no Recreate/replicas:1 constraint).
+#
+# This used to be served BY the design-frames-service process itself (a
+# hand-rolled static-file route in server.js) — the one deviation in the
+# family from the nginx-serving-stage standard, and the reason the
+# federation gate's layer-4 (nginx conf) extractor could not read this repo.
+# `enabled: true` here: unlike postgresTier below, there is no external
+# prerequisite (database, sealed secret) blocking this — CI publishes the
+# image on every push that touches services/design-frames-service/**, same
+# as the main image.
+webappMfe:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/izzywdev/fuzex-webapp-mfe
+    # Bumped by .github/workflows/release.yml on every push to master; Argo
+    # detects the diff and rolls it. Never edit this by hand in the prod
+    # overlay.
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
 
 # -- postgresTier: the Postgres LIFECYCLE tier (services/design-frames-service/
 # backend/ + db/migrations/, docs/postgres-tier.md). A SEPARATE Deployment +
@@ -158,15 +182,19 @@ postgresTier:
 # origin at /apps/fuzex/ so the portal shell imports remoteEntry.js same-origin
 # — no iframe, no CORS, no mixed-content, sharing the host's React singleton.
 #
+# Routes to the `webappMfe` Service above (templates/webapp-mfe.yaml), NOT to
+# design-frames-service's own Service — the nginx-serving-stage migration
+# moved who answers /apps/fuzex/*, so this Ingress moved with it.
+#
 # It MUST live in THIS chart, not FuzeFront's: a k8s Ingress can only reference a
-# Service in its own namespace, and design-frames-service runs in the `fuzex`
+# Service in its own namespace, and webapp-mfe runs in the `fuzex`
 # namespace (separate Argo Application). The cluster-wide Traefik routes it, so
-# no FuzeInfra change is needed. PASS-THROUGH: the service already serves assets
-# under /apps/fuzex/, so there is deliberately NO strip-prefix middleware.
+# no FuzeInfra change is needed. PASS-THROUGH: webapp-mfe's nginx already serves
+# assets under /apps/fuzex/, so there is deliberately NO strip-prefix middleware.
 #
 # Disabled + hostless by default: needs the FuzeFront host (app.fuzefront.com)
-# and the remote image to exist first. `host` is `required` when enabled so a
-# hostless Ingress can never match every request and hijack the controller.
+# to exist first. `host` is `required` when enabled so a hostless Ingress can
+# never match every request and hijack the controller.
 federatedMount:
   enabled: false
   className: traefik

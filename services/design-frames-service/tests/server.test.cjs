@@ -18,15 +18,6 @@ process.env.DESIGN_FRAMES_DATA_DIR = tmp;
 process.env.DESIGN_FRAMES_API_TOKENS = 'test-token-123';
 process.env.DESIGN_FRAMES_PORT = '0';
 
-// Placeholder for the webapp/ Module-Federation build output — a real `vite
-// build` needs network access to the private @izzywdev scope this test
-// environment doesn't have, so a tmp dir with a stand-in remoteEntry.js
-// exercises the /apps/fuzex/ route (env var override) without one.
-const webappTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'design-frames-webapp-test-'));
-fs.writeFileSync(path.join(webappTmp, 'remoteEntry.js'), 'export default { init(){}, get(){} };\n');
-fs.writeFileSync(path.join(webappTmp, 'index.html'), '<!doctype html><title>fuzex</title>');
-process.env.DESIGN_FRAMES_WEBAPP_DIR = webappTmp;
-
 const { start } = require('../server');
 
 let passed = 0;
@@ -197,33 +188,21 @@ async function main() {
     assert.strictEqual(res.status, 404);
   });
 
-  await test('GET /apps/fuzex/remoteEntry.js serves the built MF remote, unauthenticated', async () => {
+  // The Module-Federation remote (webapp/'s built dist/) used to be served
+  // here at /apps/fuzex/ by server.js itself — migrated to the family-
+  // standard nginx-serving stage (Dockerfile's `webapp-mfe` target,
+  // webapp/nginx.conf). This process no longer answers that route at all
+  // (see the "Module-Federation remote" comment near the top of server.js),
+  // so there is nothing left for this suite to exercise; the nginx image's
+  // build+serve contract is smoke-tested at the Docker level instead
+  // (.github/workflows/design-frames-service-ci.yml).
+  await test('GET /apps/fuzex/ is not served by this process (moved to nginx)', async () => {
     const res = await request(port, { method: 'GET', path: '/apps/fuzex/remoteEntry.js' });
-    assert.strictEqual(res.status, 200);
-    assert.match(res.headers['content-type'] || '', /text\/javascript/);
-    assert.match(res.raw, /export default/);
-  });
-
-  await test('GET /apps/fuzex/ serves the SPA entry document', async () => {
-    const res = await request(port, { method: 'GET', path: '/apps/fuzex/' });
-    assert.strictEqual(res.status, 200);
-    assert.match(res.headers['content-type'] || '', /text\/html/);
-    assert.match(res.raw, /fuzex/);
-  });
-
-  await test('GET /apps/fuzex/missing-chunk.js 404s cleanly', async () => {
-    const res = await request(port, { method: 'GET', path: '/apps/fuzex/missing-chunk.js' });
     assert.strictEqual(res.status, 404);
-  });
-
-  await test('GET /apps/fuzex/ path traversal is rejected, not served', async () => {
-    const res = await request(port, { method: 'GET', path: '/apps/fuzex/%2e%2e%2f%2e%2e%2fpackage.json' });
-    assert.ok([400, 404].includes(res.status), `expected 400/404, got ${res.status}`);
   });
 
   server.close();
   fs.rmSync(tmp, { recursive: true, force: true });
-  fs.rmSync(webappTmp, { recursive: true, force: true });
 
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

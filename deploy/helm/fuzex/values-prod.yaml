@@ -59,6 +59,21 @@ ingress:
   className: traefik
   host: ""
 
+# webappMfe — the Module-Federation remote's nginx-serving-stage image
+# (templates/webapp-mfe.yaml, see values.yaml for the full comment). No
+# external prerequisite blocks this the way postgresTier below is blocked:
+# release.yml publishes ghcr.io/izzywdev/fuzex-webapp-mfe on every push to
+# master that touches services/design-frames-service/**, alongside the main
+# image, and bumps this tag the same way. federatedMount stays OFF below
+# regardless (cross-repo Ingress coordination, out of scope here), so this
+# pod deploying does not yet put traffic through it.
+webappMfe:
+  image:
+    # WEBAPP_MFE_IMAGE_TAG — bumped by release.yml's webapp-mfe build job the
+    # same way image.tag above is bumped. DO NOT edit by hand.
+    tag: "0.1.0"
+    pullPolicy: Always
+
 # =============================================================================
 # postgresTier — Postgres lifecycle tier (services/design-frames-service/backend/
 # + db/migrations/, docs/postgres-tier.md). Stays FALSE here for the same

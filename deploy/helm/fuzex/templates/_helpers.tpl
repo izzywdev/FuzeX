@@ -22,3 +22,8 @@ app.kubernetes.io/component: design-frames-service
 app.kubernetes.io/name: fuzex
 app.kubernetes.io/component: postgres-tier
 {{- end -}}
+
+{{- define "fuzex.webappMfeSelectorLabels" -}}
+app.kubernetes.io/name: fuzex
+app.kubernetes.io/component: webapp-mfe
+{{- end -}}

@@ -133,7 +133,7 @@ jobs:
             --load \
             -t design-frames-service:ci \
             services/design-frames-service
-      - name: Smoke-check the built image serves /health and the MF remote
+      - name: Smoke-check the built image serves /health (MF remote moved to webapp-mfe)
         run: |
           docker run -d --name dfs-smoke -p 4400:4400 -e DESIGN_FRAMES_API_TOKENS=ci-smoke design-frames-service:ci
           for i in $(seq 1 20); do
@@ -141,12 +141,19 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:4400/health
-          # webapp/'s build actually landed in the image and is served at
-          # /apps/fuzex/ — catches the builder stage silently producing an
-          # empty dist/ or the runtime stage COPY --from path being wrong.
-          curl -sf http://127.0.0.1:4400/apps/fuzex/remoteEntry.js | head -c 200
+          # This image no longer serves the Module-Federation remote at all
+          # (nginx-serving-stage migration — see server.js's "Module-Federation
+          # remote" comment and the webapp-mfe smoke check below). Assert the
+          # 404 explicitly so a regression that re-adds serving here — putting
+          # two sources of truth for /apps/fuzex/ back in the repo — fails CI
+          # instead of silently passing.
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4400/apps/fuzex/remoteEntry.js)
           docker logs dfs-smoke
           docker rm -f dfs-smoke
+          if [ "$status" != "404" ]; then
+            echo "::error::design-frames-service still serves /apps/fuzex/remoteEntry.js (got HTTP $status) — the Module-Federation remote must be served ONLY by the webapp-mfe nginx image now."
+            exit 1
+          fi
 
       # Postgres LIFECYCLE TIER (services/design-frames-service/backend/ + db/,
       # docs/postgres-tier.md) — a separate build target in the same
@@ -182,4 +189,44 @@ jobs:
           echo "----- container logs -----"
           docker logs dfs-pg-smoke || true
           docker rm -f dfs-pg-smoke || true
+          test -n "$ok"
+
+      # webapp-mfe — the Module-Federation remote's family-standard
+      # nginx-serving-stage image (Dockerfile's `webapp-mfe` target). Same
+      # GitHub Packages build-secret need as the vanilla image's
+      # webapp-builder stage (webapp/'s private @izzywdev/fuzefront-design-system
+      # dependency).
+      - name: Build webapp-mfe image (no push — build-only smoke check)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker buildx build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            --target webapp-mfe \
+            --load \
+            -t design-frames-webapp-mfe:ci \
+            services/design-frames-service
+      - name: Smoke-check webapp-mfe serves /health and the MF remote at /apps/fuzex/
+        run: |
+          # Container port 8080, not 80: the webapp-mfe stage runs on
+          # nginxinc/nginx-unprivileged (uid 101), which cannot bind a
+          # privileged port. This is the FOURTH place that port is written
+          # down -- Dockerfile EXPOSE/HEALTHCHECK, nginx.conf `listen`, the
+          # chart's containerPort, and here. Missing this one is what made
+          # this smoke test fail while the other three already agreed.
+          docker run -d --name dfs-webapp-mfe-smoke -p 4401:8080 design-frames-webapp-mfe:ci
+          ok=
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:4401/health && { ok=1; break; }
+            sleep 1
+          done
+          # webapp/'s build actually landed in the image and nginx serves it at
+          # /apps/fuzex/ (nginx.conf's `location ^~ /apps/fuzex/` aliasing the
+          # flat docroot) — catches the builder stage silently producing an
+          # empty dist/, the Dockerfile's COPY layout disagreeing with the
+          # nginx.conf alias, or vite's `base`/`assetsDir` drifting from both.
+          curl -sf http://127.0.0.1:4401/apps/fuzex/remoteEntry.js | head -c 200 || ok=
+          echo "----- container logs -----"
+          docker logs dfs-webapp-mfe-smoke || true
+          docker rm -f dfs-webapp-mfe-smoke || true
           test -n "$ok"
