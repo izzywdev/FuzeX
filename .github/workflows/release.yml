@@ -301,6 +301,39 @@ jobs:
           PY
           git --no-pager diff -- deploy/helm/fuzex/values-prod.yaml
 
+      # -----------------------------------------------------------------------
+      # Opening this PR is the ONLY part of the release that can lose completed
+      # work, so it is the part that retries.
+      #
+      # Measured failure (2026-08-25): the image built, values-prod.yaml was
+      # bumped in-workspace from 6aa1c11f6aff to 4a0212dcf891, and then this
+      # step died with "API rate limit already exceeded for user ID ..." —
+      # discarding the bump. Prod has not moved since 2026-08-21. The cause is
+      # account-wide, not repo-local: one user identity drives every repo's
+      # release automation in this fleet and its API quota is shared and
+      # regularly exhausted. That cannot be fixed from inside this workflow.
+      # What CAN be fixed from here is this repo silently destroying a finished
+      # build when it happens. Two changes do that:
+      #
+      #   1. The bump branch is PUSHED BEFORE any API call. `git push` speaks
+      #      the git protocol, not the REST/GraphQL API, and is unaffected by
+      #      the quota that fails this step — so once the push lands, the
+      #      computed bump is durable on origin no matter what the API does
+      #      next, and a human (or a re-run) can finish the release from it.
+      #      This is deliberately preferred over an artifact upload: artifact
+      #      storage is itself exhausted account-wide right now ("Artifact
+      #      storage quota has been hit"), so an upload would be a new way for
+      #      this step to fail rather than a safety net. The branch is better
+      #      preservation anyway — it is already in the shape the PR needs.
+      #
+      #   2. Every API call retries with backoff driven by what GitHub actually
+      #      reports (Retry-After, then x-ratelimit-reset, then exponential
+      #      with jitter), bounded by a total wall-clock budget so the job can
+      #      never sit on a runner for an hour. When the budget is spent the
+      #      step FAILS — loudly, naming that the image shipped and the tag did
+      #      not, and naming the branch the bump is sitting on. No `|| true`,
+      #      no continue-on-error: an unbumped prod must be red.
+      # -----------------------------------------------------------------------
       - name: Open the tag-bump PR (branch — master requires a PR, not a direct commit)
         env:
           # Fall back to the built-in token. `${A:-$B}` is resolved by bash, not
@@ -320,32 +353,143 @@ jobs:
           fi
 
           BRANCH="release/bump-fuzex-${TAG}"
+          REPO="${{ github.repository }}"
+          OWNER="${REPO%%/*}"
 
-          existing_pr=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-          if [ -n "$existing_pr" ]; then
-            echo "PR #$existing_pr already open for $BRANCH — nothing to do."
-            exit 0
-          fi
-
+          # ---- preserve the bump first -------------------------------------
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add "$F"
           git commit -m "chore(release): bump fuzex prod image tag to ${TAG}"
-          # actions/checkout persisted the resolved token's credential helper
-          # above (token: GH_RELEASE_PAT || GITHUB_TOKEN), so a plain push works.
-          git push origin "HEAD:refs/heads/${BRANCH}"
 
-          # FAIL-LOUD: no `|| true`, no swallowed exit code. If the PR cannot be
-          # created (bad token, branch already merged and diverged, API error),
-          # this step — and the job — fails rather than silently leaving prod
-          # pinned to the old tag with no PR to fix it, which is exactly the
-          # failure mode this rewrite exists to close.
-          gh pr create --repo "${{ github.repository }}" \
-            --base master --head "$BRANCH" \
-            --title "chore(release): bump fuzex prod image tag to ${TAG}" \
-            --label auto-merge \
-            --body "$(cat <<BODY
+          # `git ls-remote` is git protocol, not the API — safe to call even
+          # when the API quota is gone. If a previous run of this release
+          # already pushed the branch, its commit is the bump and re-pushing a
+          # freshly-made one would be a non-fast-forward; leave it alone and go
+          # straight to opening the PR it never managed to open.
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "Branch ${BRANCH} already exists on origin — the ${TAG} bump is already preserved there; not re-pushing."
+          else
+            # actions/checkout persisted the resolved token's credential helper
+            # above (token: GH_RELEASE_PAT || GITHUB_TOKEN), so a plain push works.
+            git push origin "HEAD:refs/heads/${BRANCH}"
+            echo "Pushed ${BRANCH} — the computed bump is now durable on origin."
+          fi
+
+          # ---- API plumbing: retry on rate limits, fail loudly otherwise ----
+          API_OUT="$(mktemp)"; API_ERR="$(mktemp)"
+          trap 'rm -f "$API_OUT" "$API_ERR"' EXIT
+
+          # `-i` keeps the response headers, which is the only way to honour
+          # GitHub's own rate-limit signalling instead of guessing a sleep.
+          resp_status() { head -n1 "$API_OUT" | tr -d '\r' | awk '{print $2}'; }
+          resp_header() { grep -i "^$1:" "$API_OUT" 2>/dev/null | head -n1 | cut -d: -f2- | tr -d ' \r' || true; }
+          resp_body()   { awk 'BEGIN{h=1} h && /^\r?$/ {h=0; next} !h' "$API_OUT"; }
+
+          MAX_ATTEMPTS=6
+          # Total wall-clock waiting allowed across every call in this step. The
+          # core quota resets hourly, so a single reset can be ~60 min out; 15
+          # is the point where failing legibly beats holding a runner hostage.
+          MAX_TOTAL_WAIT=900
+          waited=0
+
+          fail_loud() {
+            {
+              echo "### Release incomplete — image pushed, prod tag NOT bumped"
+              echo
+              echo "- Image **ghcr.io/izzywdev/fuzex-design-frames-service:${TAG}** was built and pushed to GHCR."
+              echo "- \`deploy/helm/fuzex/values-prod.yaml\` was bumped to \`${TAG}\` and that commit **is preserved on branch \`${BRANCH}\`** on origin."
+              echo "- The tag-bump PR could **not** be opened: $1"
+              echo "- Prod stays pinned to the previous tag until a PR from \`${BRANCH}\` into \`master\` is opened and merged."
+              echo
+              echo "Re-run this job once the API quota resets, or open the PR by hand from \`${BRANCH}\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Release incomplete: image pushed, prod tag NOT bumped::$1 The image ghcr.io/izzywdev/fuzex-design-frames-service:${TAG} WAS built and pushed, and the computed values-prod.yaml bump IS preserved on branch '${BRANCH}' on origin — nothing was lost. But prod is still pinned to the previous tag until a PR from '${BRANCH}' into master is opened and merged. Re-run this job after the quota resets, or open that PR by hand. Durable fix: this fleet funnels every repo's release automation through a single user PAT, so one shared API quota gates all of them; give release automation its own identity (a GitHub App) instead."
+            exit 1
+          }
+
+          # api_call <human label> <gh api args...>
+          # Returns 0 with the response in $API_OUT, or 1 when the call is
+          # unretryable or the retry budget is spent.
+          api_call() {
+            local label="$1"; shift
+            local attempt=1 status remaining retry_after reset sleep_for src budget_left
+            while :; do
+              if gh api -i "$@" >"$API_OUT" 2>"$API_ERR"; then
+                return 0
+              fi
+              status="$(resp_status || true)"
+              status="${status:-000}"
+              remaining="$(resp_header x-ratelimit-remaining)"
+              retry_after="$(resp_header retry-after)"
+              reset="$(resp_header x-ratelimit-reset)"
+              case "$retry_after" in ''|*[!0-9]*) retry_after="" ;; esac
+              case "$reset"       in ''|*[!0-9]*) reset=""       ;; esac
+
+              echo "::group::${label}: attempt ${attempt} failed (HTTP ${status})"
+              head -c 2000 "$API_ERR" || true
+              resp_body | head -c 2000 || true
+              echo
+              echo "::endgroup::"
+
+              # Retry only what can succeed later. 401/404/422 mean the request
+              # itself is wrong and will still be wrong in ten minutes.
+              case "$status" in
+                403|429|5??|000) : ;;
+                *) echo "${label}: HTTP ${status} is not a retryable condition."; return 1 ;;
+              esac
+
+              if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+                echo "${label}: giving up after ${MAX_ATTEMPTS} attempts."
+                return 1
+              fi
+
+              # Prefer what GitHub told us over any guess of ours.
+              if [ -n "$retry_after" ]; then
+                sleep_for="$retry_after"; src="Retry-After header (secondary rate limit)"
+              elif [ "${remaining:-1}" = "0" ] && [ -n "$reset" ]; then
+                sleep_for="$(( reset - $(date -u +%s) + 5 ))"; src="x-ratelimit-reset header (primary rate limit)"
+              else
+                sleep_for="$(( 15 * (1 << (attempt - 1)) ))"; src="exponential backoff"
+              fi
+              # `[ x ] && y` at statement level would abort the whole script
+              # under `set -e` whenever the test is false, so: if/then.
+              if [ "$sleep_for" -lt 1 ]; then sleep_for=1; fi
+              # Jitter, so concurrent releases across the fleet do not all wake
+              # at the same instant and re-exhaust the shared quota together.
+              sleep_for="$(( sleep_for + RANDOM % 10 ))"
+
+              budget_left="$(( MAX_TOTAL_WAIT - waited ))"
+              if [ "$budget_left" -le 0 ]; then
+                echo "${label}: ${MAX_TOTAL_WAIT}s rate-limit wait budget exhausted."
+                return 1
+              fi
+              if [ "$sleep_for" -gt "$budget_left" ]; then sleep_for="$budget_left"; fi
+
+              echo "${label}: waiting ${sleep_for}s (${src}), then attempt $(( attempt + 1 ))/${MAX_ATTEMPTS}. Budget used: ${waited}s of ${MAX_TOTAL_WAIT}s."
+              sleep "$sleep_for"
+              waited="$(( waited + sleep_for ))"
+              attempt="$(( attempt + 1 ))"
+            done
+          }
+
+          # `gh pr list` / `gh pr create` route through gh's GraphQL API for
+          # repository/PR resolution, and that is the quota that has been
+          # exhausted here (run #32632618648). Every call below is plain REST
+          # via `gh api` instead: `gh pr list --head` becomes a filtered GET on
+          # /pulls, `gh pr create` a POST, and the label a separate POST on the
+          # issues API (REST pulls-create takes no label parameter).
+          api_call "look up an existing tag-bump PR" \
+            "repos/${REPO}/pulls?head=${OWNER}:${BRANCH}&state=open" \
+            || fail_loud "querying open PRs for ${BRANCH} failed."
+          existing_pr="$(resp_body | jq -r '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            echo "PR #$existing_pr already open for $BRANCH — nothing to do."
+            exit 0
+          fi
+
+          PR_BODY="$(cat <<BODY
           Automated GitOps release bump. \`services/design-frames-service\` built and
           pushed \`ghcr.io/izzywdev/fuzex-design-frames-service:${TAG}\` from
           ${{ github.sha }}; Argo syncs \`deploy/helm/fuzex/values-prod.yaml\` once this
@@ -359,9 +503,23 @@ jobs:
           \`enabled\` and \`ingress.*\` are untouched here — the go-live switch is a
           separate, deliberately reviewed PR, never bundled with a routine tag bump.
 
-          Labeled \`auto-merge\`. Note this repo has \`hardening.deployOnPush: true\`,
-          so \`auto-merge.yml\` will NOT auto-merge this — it must be merged by a human
-          in a deploy window, same as any other change here.
+          Note this repo has \`hardening.deployOnPush: true\`, so \`auto-merge.yml\`
+          will NOT auto-merge this — it must be merged by a human in a deploy
+          window, same as any other change here.
           BODY
           )"
-          echo "Opened tag-bump PR for ${TAG} on branch ${BRANCH}."
+
+          api_call "open the tag-bump PR" -X POST "repos/${REPO}/pulls" \
+            -f title="chore(release): bump fuzex prod image tag to ${TAG}" \
+            -f head="${BRANCH}" \
+            -f base="master" \
+            -f body="${PR_BODY}" \
+            || fail_loud "creating the pull request failed."
+          PR_NUMBER="$(resp_body | jq -r '.number')"
+
+          api_call "label the tag-bump PR auto-merge" \
+            -X POST "repos/${REPO}/issues/${PR_NUMBER}/labels" \
+            -f "labels[]=auto-merge" \
+            || fail_loud "PR #${PR_NUMBER} was opened but could not be labelled auto-merge; add the label to it by hand."
+
+          echo "Opened tag-bump PR #${PR_NUMBER} for ${TAG} on branch ${BRANCH}."
