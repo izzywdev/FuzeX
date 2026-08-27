@@ -825,13 +825,6 @@
       "sourceSha256": "582e9e802e923ea8ce7979f61169327d79e0d461ee5babdfefc1d86c78d9a172",
       "renderedSha256": "582e9e802e923ea8ce7979f61169327d79e0d461ee5babdfefc1d86c78d9a172"
     },
-    "scripts/__tests__/test_gate_api_version.py": {
-      "capability": "workflows",
-      "mode": "managed",
-      "sourcePath": "scripts/__tests__/test_gate_api_version.py",
-      "sourceSha256": "5b40f290317dc2d894c364b5c72d261d044ba139faa415a662b70b69959f3968",
-      "renderedSha256": "5b40f290317dc2d894c364b5c72d261d044ba139faa415a662b70b69959f3968"
-    },
     "scripts/__tests__/test_gate_identifier.py": {
       "capability": "entity-identity",
       "mode": "managed",
@@ -852,13 +845,6 @@
       "sourcePath": "scripts/check-registration.mjs",
       "sourceSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b",
       "renderedSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b"
-    },
-    "scripts/gate_api_version.py": {
-      "capability": "workflows",
-      "mode": "managed",
-      "sourcePath": "scripts/gate_api_version.py",
-      "sourceSha256": "9ec6adda8c36df9397c7007285710a6f4af242151fc50d44b543e6d52956d41a",
-      "renderedSha256": "9ec6adda8c36df9397c7007285710a6f4af242151fc50d44b543e6d52956d41a"
     },
     "scripts/gate_ds_conformance.py": {
       "capability": "design-system",
