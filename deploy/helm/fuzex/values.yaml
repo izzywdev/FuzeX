@@ -1,0 +1,203 @@
+# =============================================================================
+# FuzeX — design-frames-service chart defaults.
+#
+# `enabled` is FALSE here and TRUE only in the prod overlay, deliberately: this
+# chart had no existence before, so a default-on chart would start deploying the
+# moment anything renders it, ahead of the image and the sealed token existing.
+# =============================================================================
+enabled: false
+
+image:
+  repository: ghcr.io/izzywdev/fuzex-design-frames-service
+  # Bumped by .github/workflows/release.yml on every push to master; Argo detects
+  # the diff and rolls it. Never edit this by hand in the prod overlay.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+service:
+  # Matches DESIGN_FRAMES_PORT, which the image also defaults to. Kept as one
+  # value so the container port, the Service port and the probe target cannot
+  # drift apart.
+  port: 4400
+
+# -- persistence: NOT optional in any environment where approvals matter.
+# lib/store.js writes every feature, frame, manifest, content stamp and per-flow
+# approval as files under mountPath. There is no database. With
+# `enabled: false` the Deployment falls back to an emptyDir and every approval is
+# lost on pod restart — which reads as "the design was never signed off".
+persistence:
+  enabled: true
+  # Empty = the cluster's default StorageClass. Set explicitly if the default is
+  # not the one you want this to land on.
+  storageClass: ""
+  size: 2Gi
+  mountPath: /data/features
+
+# -- write authentication. Reads (including the public /site review surface) are
+# unauthenticated by the service's own design; writes need a Bearer token from
+# this Secret. `optional: true` in the pod spec, so a missing secret brings the
+# service up READ-ONLY rather than CrashLooping — every write 401s, which is a
+# safe state and a visible one.
+apiTokens:
+  existingSecret: fuzex-api-tokens
+  secretKey: DESIGN_FRAMES_API_TOKENS
+
+# -- ingress: the public origin registration/manifest.json points integration.url
+# at. Disabled and hostless — the name needs DNS + the Cloudflare tunnel, which
+# are FuzeInfra's to provide. Enabling without a host fails the render on purpose.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+
+# -- registration with the FuzeFront app registry, as a fail-closed init
+# container. The payload is this repo's registration/ directory, vendored into
+# files/registration/ because Helm's .Files cannot read above the chart dir;
+# scripts/check-registration.mjs fails CI if the two copies diverge.
+registration:
+  enabled: true
+  # alpine, not a bespoke image: register.sh needs only sh + curl + jq, which the
+  # init container installs. Nothing product-specific is required, so there is no
+  # image here to drift against FuzeX's own build.
+  image: alpine:3.20
+  apiUrl: http://fuzefront-applications.fuzefront.svc.cluster.local:3003
+  # Must be sealed into the fuzex namespace. NOT optional in the pod spec: a
+  # missing secret fails the pod rather than skipping registration silently.
+  secretName: fuzefront-registration
+  # Rendered by templates/registration-configmap.yaml in THIS chart — never
+  # created by hand. A kubectl one-liner is not a CI/CD registration path, and a
+  # pod referencing a ConfigMap nothing creates hangs in ContainerCreating rather
+  # than failing loudly.
+  configMapName: fuzex-registration
+
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+# -- webappMfe: the Module-Federation remote (webapp/'s built dist/), served
+# at /apps/fuzex/ by the family-standard nginx-serving stage (Dockerfile's
+# `webapp-mfe` target, ../../../services/design-frames-service/webapp/
+# nginx.conf) — templates/webapp-mfe.yaml. A SEPARATE Deployment + Service
+# from the design-frames-service one above: that pod is the REST API + the
+# public /site surface; this one is stateless static-asset serving and can
+# roll normally (no Recreate/replicas:1 constraint).
+#
+# This used to be served BY the design-frames-service process itself (a
+# hand-rolled static-file route in server.js) — the one deviation in the
+# family from the nginx-serving-stage standard, and the reason the
+# federation gate's layer-4 (nginx conf) extractor could not read this repo.
+# `enabled: true` here: unlike postgresTier below, there is no external
+# prerequisite (database, sealed secret) blocking this — CI publishes the
+# image on every push that touches services/design-frames-service/**, same
+# as the main image.
+webappMfe:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/izzywdev/fuzex-webapp-mfe
+    # Bumped by .github/workflows/release.yml on every push to master; Argo
+    # detects the diff and rolls it. Never edit this by hand in the prod
+    # overlay.
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+# -- postgresTier: the Postgres LIFECYCLE tier (services/design-frames-service/
+# backend/ + db/migrations/, docs/postgres-tier.md). A SEPARATE Deployment +
+# Service (its own port, 4410) from the vanilla frontend above, built from its
+# OWN image (Dockerfile's `postgres-tier` build target) — an isolated process
+# with an isolated rollout, exactly as docs/postgres-tier.md specifies
+# ("isolated from the vanilla bridge-server.js/server.js").
+#
+# `enabled: false` here, deliberately, for the same reason the top-level
+# `enabled` above is false: none of the three prerequisites exist yet —
+#   1. the postgresTier image has never been published (this PR adds the
+#      build target; release.yml publishes it on the next push to master
+#      that touches services/design-frames-service/**);
+#   2. FuzeInfra has not yet provisioned the Postgres database, the
+#      design_frames schema, the role, or the DATABASE_URL SealedSecret (see
+#      deploy/infra-requests/design-frames-postgres.md — the hand-off request,
+#      never provisioned from this repo);
+#   3. `databaseSecret.name` below does not exist as a SealedSecret in the
+#      `fuzex` namespace yet.
+# Flip to true only after all three exist, in one PR, during a deploy window
+# — mirroring the top-level go-live order in values-prod.yaml.
+postgresTier:
+  enabled: false
+
+  image:
+    repository: ghcr.io/izzywdev/fuzex-design-frames-postgres-tier
+    # Bumped by .github/workflows/release.yml's postgres-tier build job on
+    # every push to master that touches services/design-frames-service/**;
+    # Argo detects the diff and rolls it. Never edit this by hand in the prod
+    # overlay.
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    # Matches backend/src/index.ts's DESIGN_FRAMES_PG_PORT default (4410) —
+    # deliberately different from `service.port` (4400) above so both tiers
+    # can run side by side during rollout (docs/postgres-tier.md "Migration
+    # path").
+    port: 4410
+
+  # -- DATABASE_URL, sourced from a FuzeInfra-provisioned SealedSecret in the
+  # `fuzex` namespace. This chart NEVER creates the secret, the role, the
+  # schema, or the database itself — see
+  # deploy/infra-requests/design-frames-postgres.md for the hand-off request.
+  # NOT `optional` in the pod spec (unlike apiTokens above): backend/src/lib/db.ts
+  # throws on the first query if DATABASE_URL is unset, so a pod missing it
+  # should fail loudly (CrashLoopBackOff) rather than silently 500 every
+  # lifecycle request.
+  databaseSecret:
+    name: fuzex-design-frames-db
+    key: DATABASE_URL
+
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+  # -- the db-migration Job (db/migrate.sh, templates/db-migrate-job.yaml),
+  # run as an Argo CD PreSync hook — see that template for why PreSync (Argo)
+  # and not a Helm pre-install/pre-upgrade hook.
+  migration:
+    # migrate.sh is idempotent end-to-end (db/README.md) — tracked per-file in
+    # design_frames._migrations, and every migration file is independently
+    # re-runnable — so a retry after a transient connection failure is safe.
+    backoffLimit: 2
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { cpu: 200m, memory: 128Mi }
+
+# -- federatedMount: the SAME-ORIGIN portal mount for the Module-Federation
+# remote. This is a DIFFERENT surface from `ingress` above (a public origin for
+# the mobile/standalone case): it exposes the remote under the FuzeFront HOST
+# origin at /apps/fuzex/ so the portal shell imports remoteEntry.js same-origin
+# — no iframe, no CORS, no mixed-content, sharing the host's React singleton.
+#
+# Routes to the `webappMfe` Service above (templates/webapp-mfe.yaml), NOT to
+# design-frames-service's own Service — the nginx-serving-stage migration
+# moved who answers /apps/fuzex/*, so this Ingress moved with it.
+#
+# It MUST live in THIS chart, not FuzeFront's: a k8s Ingress can only reference a
+# Service in its own namespace, and webapp-mfe runs in the `fuzex`
+# namespace (separate Argo Application). The cluster-wide Traefik routes it, so
+# no FuzeInfra change is needed. PASS-THROUGH: webapp-mfe's nginx already serves
+# assets under /apps/fuzex/, so there is deliberately NO strip-prefix middleware.
+#
+# Disabled + hostless by default: needs the FuzeFront host (app.fuzefront.com)
+# to exist first. `host` is `required` when enabled so a hostless Ingress can
+# never match every request and hijack the controller.
+federatedMount:
+  enabled: false
+  className: traefik
+  host: ""
+  annotations: {}
+  path: /apps/fuzex

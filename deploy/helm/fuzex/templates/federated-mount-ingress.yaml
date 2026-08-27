@@ -1,0 +1,57 @@
+{{- if and .Values.enabled .Values.federatedMount.enabled .Values.webappMfe.enabled }}
+{{/*
+Same-origin portal mount for the design-frames Module-Federation remote.
+
+Routes {host}/apps/fuzex/* (e.g. /apps/fuzex/remoteEntry.js) to the
+`webapp-mfe` Service (templates/webapp-mfe.yaml) so the FuzeFront portal
+shell imports the remote SAME-ORIGIN — no iframe, no CORS, no
+mixed-content — and it mounts sharing the host's React 19 singleton.
+
+Lives in FuzeX's chart, not FuzeFront's: an Ingress can only target a Service in
+its own namespace, and this service runs in `fuzex` (separate Argo Application).
+The cluster-wide Traefik controller routes it; no FuzeInfra change is needed.
+
+PASS-THROUGH, not rewrite: webapp-mfe's nginx.conf already serves the built
+webapp under the /apps/fuzex/ prefix (webapp/vite.config.ts
+`base: '/apps/fuzex/'`, `assetsDir: ''`), so Traefik forwards the path
+verbatim — deliberately NO strip-prefix middleware. This used to point at
+design-frames-service's own Service — server.js served the same prefix
+itself before the nginx-serving-stage migration (see server.js's
+"Module-Federation remote" comment and services/design-frames-service/
+Dockerfile's `webapp-mfe` stage) — updated here to the new pod so this
+Ingress, the vite `base`, and the nginx `location` all still agree.
+
+Requires `webappMfe.enabled` too: routing to a Service backed by nothing
+would 503 behind a green Ingress, the same silent-breakage shape this whole
+migration exists to close.
+
+Disabled + hostless by default. `host` is `required` when enabled so a hostless
+Ingress can never match every request that reaches the controller.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "fuzex.fullname" . }}-federated-mount
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+  {{- with .Values.federatedMount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.federatedMount.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "federatedMount.host is required when federatedMount.enabled is true" .Values.federatedMount.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.federatedMount.path | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "fuzex.fullname" . }}-webapp-mfe
+                port:
+                  number: {{ .Values.webappMfe.service.port }}
+{{- end }}

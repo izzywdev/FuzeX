@@ -1,0 +1,145 @@
+{
+  "$schema": "./tools.schema.json",
+  "server": "design-frames-service",
+  "protocolVersion": "2024-11-05",
+  "transport": "stdio",
+  "note": "Tool manifest for mcp-maintainer. `mutates: true` tools write to DESIGN_FRAMES_DATA_DIR (or, once services are split, call the network API's authenticated write routes) — an MCP client should treat them as consequential. `mutates: false` tools are pure reads, safe to call speculatively.",
+  "tools": [
+    {
+      "name": "list_features",
+      "description": "List all design-frames features with their slug, name, frame count, and per-flow approval state.",
+      "mutates": false,
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "get_feature",
+      "description": "Get one feature's full manifest and every frame's HTML content.",
+      "mutates": false,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug"],
+        "properties": { "slug": { "type": "string", "description": "Feature slug, e.g. 'checkout-redesign'." } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_feature",
+      "description": "Create a new feature shell (manifest with no frames yet). Fails if the slug already exists.",
+      "mutates": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug", "name", "description"],
+        "properties": {
+          "slug": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "designSystem": { "type": "string" },
+          "entry": { "type": "string" },
+          "sourceRepo": { "type": "string", "description": "Which consuming product these frames are for, e.g. 'FuzeFront'." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "propose_frame",
+      "description": "Add or replace one frame: upserts its metadata into manifest.frames[] AND writes its HTML content. Use this to author a new screen or revise an existing one.",
+      "mutates": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug", "id", "file", "label", "summary", "testHooks", "html"],
+        "properties": {
+          "slug": { "type": "string" },
+          "id": { "type": "string", "description": "Stable frame id, matching the file stem, e.g. '01-invoice-history'." },
+          "file": { "type": "string", "pattern": "\\.html$" },
+          "label": { "type": "string" },
+          "route": { "type": "string" },
+          "flow": { "type": "string", "description": "build.flows[].id this frame belongs to." },
+          "summary": { "type": "string" },
+          "acceptanceNotes": { "type": "string" },
+          "testHooks": { "type": "array", "items": { "type": "string" } },
+          "html": { "type": "string", "description": "The frame's raw HTML content." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "define_flow",
+      "description": "Add or replace a build.flows[] entry (the orchestrator/route a set of frames implements). Frames reference flows by id.",
+      "mutates": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug", "id", "orchestrator", "route"],
+        "properties": {
+          "slug": { "type": "string" },
+          "id": { "type": "string" },
+          "orchestrator": { "type": "string" },
+          "route": { "type": "string", "pattern": "^/" }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "compute_stamp",
+      "description": "Compute the current content stamp for a feature and compare it to the persisted one. Read-only — does not write.",
+      "mutates": false,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug"],
+        "properties": { "slug": { "type": "string" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "commit_stamp",
+      "description": "Compute AND persist the content stamp onto the manifest, binding future approvals to the current frame content.",
+      "mutates": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug"],
+        "properties": { "slug": { "type": "string" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "approve_flow",
+      "description": "Approve one flow within a feature.",
+      "mutates": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug", "flowId", "approvedBy"],
+        "properties": {
+          "slug": { "type": "string" },
+          "flowId": { "type": "string" },
+          "approvedBy": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "reject_flow",
+      "description": "Revoke a flow's approval, optionally with a reason.",
+      "mutates": true,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug", "flowId"],
+        "properties": {
+          "slug": { "type": "string" },
+          "flowId": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_site_url",
+      "description": "Get the public review-site URL for a feature (or one of its frames), for sharing with reviewers.",
+      "mutates": false,
+      "inputSchema": {
+        "type": "object",
+        "required": ["slug"],
+        "properties": { "slug": { "type": "string" }, "file": { "type": "string", "description": "Optional: link directly to one frame." } },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{{- if and .Values.enabled .Values.ingress.enabled }}
+{{/*
+The public origin registration/manifest.json points `integration.url` at.
+
+DISABLED and hostless by default: the name needs DNS + the Cloudflare tunnel,
+which are FuzeInfra's to provide, not this repo's to assume. Inventing a hostname
+here would produce an Ingress nothing routes to — the same class of silent
+breakage as a portal tile that mounts a dead origin.
+
+`host` is `required`: an Ingress with an empty host matches EVERY request that
+reaches the controller, so enabling this without one must fail at template time
+rather than quietly hijacking the cluster's traffic.
+
+NOTE ON WHAT THIS EXPOSES. design-frames-service authenticates WRITES with a
+Bearer token and leaves reads — including the /site review surface — public by
+design. Publishing it therefore publishes every frame and every approval record
+to anyone who can reach the host. That is the intended shape for a design-review
+site, but it is a decision, so it is written down here rather than discovered.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "fuzex.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "ingress.host is required when ingress.enabled is true" .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "fuzex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

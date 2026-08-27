@@ -1,0 +1,889 @@
+openapi: 3.0.3
+info:
+  title: design-frames-service
+  version: 0.2.0
+  description: >
+    Product-design-phase service: navigable HTML frames, per-flow approval,
+    and the API/component/flag contract seam. Extracted from FuzeFront's
+    design/frames/** pipeline — see README.md and docs/EXTRACTION.md.
+
+
+    v0.2.0 introduces the Postgres-backed lifecycle tier (contract only; the
+    Express/pg runtime lands in a later stream). Frame CONTENT stays in git
+    (the owning product's design/frames/<feature>/); Postgres holds ONLY
+    lifecycle/index metadata + refs, keyed by content-stamp. Entities use the
+    product-local `fxdf` identifier namespace (see .fuze/manifest.json and
+    docs/postgres-tier.md). The entire v0.1.0 /api/v1/features/** surface is
+    unchanged and backward-compatible — the new tier projects it from the new
+    model. See docs/postgres-tier.md for the two-tier model and migration path.
+  x-changelog:
+    - version: 0.2.0
+      date: '2026-08-19'
+      changes:
+        - 'ADD /api/v1/projects CRUD (create mints fxdf_prj_*, additionalProperties:false, no client id) + GET /{id}/features.'
+        - 'ADD optional projectId reference on POST /api/v1/features (reference, not identity).'
+        - 'ADD GET /api/v1/features/{slug}/flows/{flowId}/approvals — append-only decision history (paginated).'
+        - 'EXTEND approve/reject bodies: both accept optional contentStamp; reject now requires reason; responses echo the created approval id (fxdf_apr_*) + stamp. Old {approvedBy}-only approve callers still work.'
+        - 'ADD discussions: POST/GET/GET{id}/PATCH{id} + POST {id}/comments, and convenience GET /api/v1/features/{slug}/discussions. Polymorphic target carries its type (targetType + targetRef).'
+    - version: 0.1.0
+      date: '2026-08-11'
+      changes:
+        - 'Initial extraction from FuzeFront design/frames/** pipeline (flat-file store).'
+servers:
+  - url: http://localhost:4400
+security:
+  - bearerAuth: []
+  - {}
+paths:
+  /health:
+    get:
+      summary: Liveness check
+      security: []
+      responses:
+        '200':
+          description: healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: healthy }
+                  timestamp: { type: integer }
+
+  /api/v1/features:
+    get:
+      summary: List features
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features:
+                    type: array
+                    items: { $ref: '#/components/schemas/FeatureSummary' }
+    post:
+      summary: Create a feature shell
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  manifest: { $ref: '#/components/schemas/Manifest' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [slug]
+              properties:
+                slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
+                name: { type: string }
+                description: { type: string }
+                designSystem: { type: string }
+                entry: { type: string }
+                sourceRepo: { type: string, nullable: true, description: "Which consuming product these frames are for, e.g. 'FuzeFront'." }
+                projectId:
+                  allOf: [ { $ref: '#/components/schemas/ProjectId' } ]
+                  nullable: true
+                  description: >
+                    OPTIONAL reference to an existing project (fxdf_prj_*) this
+                    feature belongs to. A reference to an entity that already
+                    exists, NOT identity (identifier-standard §1): the feature's
+                    own id is still minted server-side. Omitted/null = unassigned.
+
+  /api/v1/features/{slug}:
+    get:
+      summary: Get a feature's manifest and all frame contents
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  manifest: { $ref: '#/components/schemas/Manifest' }
+                  frames:
+                    type: object
+                    additionalProperties: { type: string }
+                    description: frame file name -> raw HTML content
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/manifest:
+    put:
+      summary: Replace the manifest (schema-validated)
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Manifest' }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/stamp:
+    get:
+      summary: Compute the current content stamp and compare to the persisted one (no write)
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  stamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  manifestStamp: { type: string, nullable: true }
+                  current: { type: boolean }
+    post:
+      summary: Compute AND persist the stamp onto the manifest
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/frames/{file}:
+    parameters:
+      - { $ref: '#/components/parameters/Slug' }
+      - name: file
+        in: path
+        required: true
+        schema: { type: string, pattern: '\.html$' }
+    get:
+      summary: Get one frame's raw HTML
+      security: []
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Create/replace one frame's HTML content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [html]
+              properties:
+                html: { type: string }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a frame
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/flows/{flowId}/approve:
+    post:
+      summary: Approve a flow (appends an approve decision to the flow's log)
+      description: >
+        Appends an `approve` decision to the flow's append-only approval log
+        (never mutates an existing row). Backward-compatible: an old caller
+        sending only `{ approvedBy }` still works. If `contentStamp` is
+        supplied it binds the decision to the exact frames the reviewer saw
+        (must equal the feature's current stamp, else 409). The response echoes
+        the created approval (fxdf_apr_*) and the stamp it was bound to.
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: flowId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [approvedBy]
+              properties:
+                approvedBy: { type: string, description: 'Actor reference (email/subject). Paired with actorType server-side.' }
+                actorType:
+                  type: string
+                  nullable: true
+                  enum: [user, agent]
+                  description: 'OPTIONAL type discriminator for approvedBy (identifier-standard §2). Defaults to user when omitted.'
+                contentStamp:
+                  type: string
+                  nullable: true
+                  pattern: '^[0-9a-f]{64}$'
+                  description: 'OPTIONAL sha256 content stamp the reviewer saw; bound onto the decision. Mismatch with the current stamp → 409.'
+      responses:
+        '200':
+          description: Approve decision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StampConflict' }
+
+  /api/v1/features/{slug}/flows/{flowId}/reject:
+    post:
+      summary: Reject a flow (appends a reject decision to the flow's log)
+      description: >
+        Appends a `reject` decision (with a required `reason`) to the flow's
+        append-only approval log. Reject re-dispatches product-designer for an
+        improving iteration; it does not delete prior rows. The response echoes
+        the created approval (fxdf_apr_*) and any bound stamp.
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: flowId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, description: 'Why the flow was rejected. REQUIRED as of v0.2.0 — an append-only decision log row must carry its rationale.' }
+                rejectedBy: { type: string, nullable: true, description: 'Actor reference (email/subject). Paired with actorType.' }
+                actorType:
+                  type: string
+                  nullable: true
+                  enum: [user, agent]
+                  description: 'OPTIONAL type discriminator for rejectedBy (identifier-standard §2). Defaults to user when omitted.'
+                contentStamp:
+                  type: string
+                  nullable: true
+                  pattern: '^[0-9a-f]{64}$'
+                  description: 'OPTIONAL sha256 content stamp the reviewer saw; bound onto the decision.'
+      responses:
+        '200':
+          description: Reject decision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/flows/{flowId}/approvals:
+    get:
+      summary: List a flow's append-only approval decision history (newest first)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: flowId
+          in: path
+          required: true
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Approval' }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects:
+    get:
+      summary: List projects (paginated)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Project' }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+    post:
+      summary: Create a project (server mints the id)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/projects/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectIdPath' }
+    get:
+      summary: Get one project
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update a project's mutable fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/features:
+    get:
+      summary: List the features belonging to a project (paginated)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/FeatureSummary' }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/discussions:
+    get:
+      summary: List discussions for one polymorphic target (paginated)
+      security: []
+      parameters:
+        - name: targetType
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/DiscussionTargetType' }
+        - name: targetRef
+          in: query
+          required: true
+          description: 'The typed id of the target (fxdf_prj/ftr/flw/frm_*). Paired with targetType — no bare-id lookup (identifier-standard §2).'
+          schema: { type: string }
+        - name: resolved
+          in: query
+          required: false
+          description: 'Filter by resolution state; omit for all.'
+          schema: { type: boolean }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Discussion' }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        '400': { $ref: '#/components/responses/Validation' }
+    post:
+      summary: Open a discussion on a polymorphic target (server mints the id)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscussionCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Discussion' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/discussions/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/DiscussionIdPath' }
+    get:
+      summary: Get one discussion with its comment thread
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscussionWithComments' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Resolve or reopen a discussion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [resolved]
+              properties:
+                resolved: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Discussion' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/discussions/{id}/comments:
+    parameters:
+      - { $ref: '#/components/parameters/DiscussionIdPath' }
+    post:
+      summary: Append a comment to a discussion thread (append-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommentCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/discussions:
+    get:
+      summary: Convenience — list discussions targeting a feature (by slug), paginated
+      description: 'Equivalent to GET /api/v1/discussions?targetType=feature&targetRef=<the feature id for this slug>.'
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: resolved
+          in: query
+          required: false
+          schema: { type: boolean }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Discussion' }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /site/{slug}:
+    get:
+      summary: Rendered navigable review index for a feature (public, replaces GitHub Pages)
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200': { description: OK, content: { text/html: {} } }
+
+  /site/{slug}/{file}:
+    get:
+      summary: One rendered frame (public)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK, content: { text/html: {} } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Required for all write operations (POST/PUT/DELETE except /health). Reads are public.
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
+    ProjectIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ProjectId' }
+    DiscussionIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/DiscussionId' }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: 'Max items per page. Default 50, max 200.'
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 'Opaque forward cursor from a prior page.nextCursor. Absent = first page.'
+      schema: { type: string }
+  responses:
+    Validation:
+      description: Manifest/body failed validation
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              details: { type: array, items: { type: string } }
+    Unauthorized:
+      description: Missing/invalid bearer token on a write operation
+    NotFound:
+      description: Feature, flow, frame, project, or discussion not found
+    Conflict:
+      description: Slug/name already exists
+    StampConflict:
+      description: Supplied contentStamp does not match the feature's current stamp (stale review)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              expectedStamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+              suppliedStamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+  schemas:
+    FeatureSummary:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        sourceRepo: { type: string, nullable: true }
+        stamp: { type: string, nullable: true }
+        frameCount: { type: integer }
+        flows:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              approved: { type: boolean }
+    Manifest:
+      description: See lib/manifest.schema.json for the authoritative JSON Schema (ported from FuzeFront's design/frames/_template/manifest.schema.json).
+      type: object
+      required: [name, description, designSystem, entry, frames]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        designSystem: { type: string }
+        entry: { type: string }
+        sourceRepo: { type: string, nullable: true }
+        stamp: { type: string, nullable: true }
+        frames:
+          type: array
+          items:
+            type: object
+            required: [id, file, label, summary, testHooks]
+            properties:
+              id: { type: string }
+              file: { type: string }
+              label: { type: string }
+              route: { type: string }
+              flow: { type: string }
+              summary: { type: string }
+              acceptanceNotes: { type: string }
+              testHooks: { type: array, items: { type: string } }
+        contract:
+          type: object
+          properties:
+            openapi: { type: string }
+            client: { type: string }
+            schemas: { type: array, items: { type: string } }
+            endpoints: { type: array, items: { type: string } }
+            component: { type: string }
+            featureFlag: { type: string }
+        build:
+          type: object
+          properties:
+            flows:
+              type: array
+              items:
+                type: object
+                required: [id, orchestrator, route]
+                properties:
+                  id: { type: string }
+                  orchestrator: { type: string }
+                  route: { type: string }
+                  approved: { type: boolean }
+                  approvedBy: { type: string, nullable: true }
+                  approvedAt: { type: string, nullable: true }
+            components: { type: array, items: { type: string } }
+            packages: { type: array, items: { type: string } }
+
+    # ---- v0.2.0 Postgres lifecycle-tier schemas -------------------------------
+    # TypeIDs in the product-local `fxdf` namespace (.fuze/manifest.json identity).
+    # Ids are OPAQUE past the prefix (identifier-standard): patterns validate the
+    # prefix only and do NOT assume a fixed suffix length. Servers mint every id.
+    ProjectId:
+      type: string
+      pattern: '^fxdf_prj_[0-9a-hjkmnp-tv-z]+$'
+      description: 'Project TypeID, e.g. fxdf_prj_01h455vb4pex5vsknk084sn02q.'
+      example: fxdf_prj_01h455vb4pex5vsknk084sn02q
+    ApprovalId:
+      type: string
+      pattern: '^fxdf_apr_[0-9a-hjkmnp-tv-z]+$'
+      example: fxdf_apr_01h455vb4pex5vsknk084sn02q
+    DiscussionId:
+      type: string
+      pattern: '^fxdf_dsc_[0-9a-hjkmnp-tv-z]+$'
+      example: fxdf_dsc_01h455vb4pex5vsknk084sn02q
+    CommentId:
+      type: string
+      pattern: '^fxdf_cmt_[0-9a-hjkmnp-tv-z]+$'
+      example: fxdf_cmt_01h455vb4pex5vsknk084sn02q
+    FrameRefId:
+      type: string
+      pattern: '^fxdf_frm_[0-9a-hjkmnp-tv-z]+$'
+      example: fxdf_frm_01h455vb4pex5vsknk084sn02q
+
+    PageInfo:
+      type: object
+      required: [nextCursor, hasMore]
+      description: 'Cursor pagination envelope page block (baseline §4.1).'
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+          description: 'Opaque cursor for the next page, or null when hasMore is false.'
+        hasMore: { type: boolean }
+        total:
+          type: integer
+          nullable: true
+          description: 'Total matching rows when cheaply known; otherwise omitted/null.'
+
+    Project:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/ProjectId' }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        sourceRepo:
+          type: string
+          nullable: true
+          description: "Which consuming product this project's features are for, e.g. 'FuzeFront'."
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProjectCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      description: >
+        Create body. No `id` — the owning service mints fxdf_prj_*
+        (identifier-standard §1). additionalProperties:false is mandatory.
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        sourceRepo: { type: string, nullable: true }
+    ProjectPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 'Mutable fields only. Cannot change id.'
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        sourceRepo: { type: string, nullable: true }
+
+    Approval:
+      type: object
+      description: >
+        One row of a flow's append-only decision log. Never mutated; a change
+        of mind appends a new row. Each row is stamp-bound to the frames the
+        actor saw at decision time.
+      required: [id, slug, flowId, decision, actorRef, actorType, decidedAt]
+      properties:
+        id: { $ref: '#/components/schemas/ApprovalId' }
+        slug: { type: string, description: 'Feature slug the flow belongs to.' }
+        flowId: { type: string }
+        decision:
+          type: string
+          enum: [approve, reject]
+          description: 'Discriminator for the approve/reject union.'
+        actorRef: { type: string, description: 'Who decided (approvedBy/rejectedBy).' }
+        actorType:
+          type: string
+          enum: [user, agent]
+          description: 'Type discriminator for actorRef (identifier-standard §2).'
+        contentStamp:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-f]{64}$'
+          description: 'The sha256 stamp this decision was bound to, when supplied.'
+        reason:
+          type: string
+          nullable: true
+          description: 'Required for decision=reject; null/absent for approve.'
+        decidedAt: { type: string, format: date-time }
+
+    DiscussionTargetType:
+      type: string
+      enum: [project, feature, flow, frame, element]
+      description: 'Polymorphic discussion target type; paired with targetRef.'
+    Discussion:
+      type: object
+      required: [id, targetType, targetRef, resolved, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/DiscussionId' }
+        targetType: { $ref: '#/components/schemas/DiscussionTargetType' }
+        targetRef:
+          type: string
+          description: >
+            The typed id of the target (fxdf_prj/ftr/flw/frm_*). Carried WITH
+            targetType so no lookup resolves a bare id (identifier-standard §2).
+        targetSelector:
+          type: string
+          nullable: true
+          description: >
+            For targetType=element: a data-* testHook selector identifying the
+            element within the target frame (e.g. "[data-testhook=reveal-token]").
+            Null for non-element targets.
+        title: { type: string, nullable: true }
+        resolved: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DiscussionWithComments:
+      allOf:
+        - $ref: '#/components/schemas/Discussion'
+        - type: object
+          required: [comments]
+          properties:
+            comments:
+              type: array
+              description: 'The thread, oldest first. Soft-deleted comments are tombstoned, not omitted.'
+              items: { $ref: '#/components/schemas/Comment' }
+    DiscussionCreate:
+      type: object
+      additionalProperties: false
+      required: [targetType, targetRef]
+      description: >
+        Create body. No `id` — server mints fxdf_dsc_* (identifier-standard §1).
+        targetType + targetRef are a paired polymorphic reference (§2).
+      properties:
+        targetType: { $ref: '#/components/schemas/DiscussionTargetType' }
+        targetRef: { type: string, minLength: 1 }
+        targetSelector:
+          type: string
+          nullable: true
+          description: 'Required when targetType=element (a data-* testHook selector); otherwise omit.'
+        title: { type: string, nullable: true }
+
+    Comment:
+      type: object
+      required: [id, discussionId, body, authorRef, authorType, createdAt, deleted]
+      properties:
+        id: { $ref: '#/components/schemas/CommentId' }
+        discussionId: { $ref: '#/components/schemas/DiscussionId' }
+        parentCommentId:
+          allOf: [ { $ref: '#/components/schemas/CommentId' } ]
+          nullable: true
+          description: 'Nullable self-reference for threading; null = top-level.'
+        body: { type: string, description: 'Empty string when deleted=true (tombstone).' }
+        authorRef: { type: string }
+        authorType:
+          type: string
+          enum: [user, agent]
+          description: 'Type discriminator for authorRef (identifier-standard §2).'
+        deleted: { type: boolean, description: 'Soft-delete tombstone flag; the row is retained (append-only thread).' }
+        createdAt: { type: string, format: date-time }
+    CommentCreate:
+      type: object
+      additionalProperties: false
+      required: [body]
+      description: 'Create body. No `id` — server mints fxdf_cmt_* (identifier-standard §1).'
+      properties:
+        body: { type: string, minLength: 1 }
+        parentCommentId:
+          allOf: [ { $ref: '#/components/schemas/CommentId' } ]
+          nullable: true
+          description: 'Optional parent comment to thread under (must belong to the same discussion).'
+        authorType:
+          type: string
+          nullable: true
+          enum: [user, agent]
+          description: 'Optional type discriminator for the author; defaults to user.'

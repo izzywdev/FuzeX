@@ -1,0 +1,123 @@
+name: gate-registration
+
+# FuzeX registers itself with the FuzeFront app registry from a fail-closed
+# init container on its frontend pod. Three things this gate asserts, each of
+# which was wrong or unchecked and none of which failed loudly on its own:
+#
+#   1. nav.section must be a real NavSection. The shared kit validator is a
+#      fleet-POLICY checker and does not re-validate the schema, so it passed
+#      `"business"` — a value the platform rejects with 400, which register.sh
+#      treats as fatal.
+#   2. Every ConfigMap the pod mounts must be RENDERED BY THIS CHART. The chart
+#      previously named two that nothing created, one of which README.md said an
+#      operator would `kubectl create` by hand. A pod referencing a missing
+#      ConfigMap does not CrashLoop — it sits in ContainerCreating forever, which
+#      is the one failure mode a fail-closed init container cannot report.
+#   3. Exactly ONE workload may carry the init container, or two race and
+#      re-register each other on every rollout.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'registration/**'
+      - 'deploy/**'
+      - 'scripts/check-registration.mjs'
+      - '.github/workflows/gate-registration.yml'
+  pull_request:
+    # `ready_for_review` is explicit: the default set is
+    # [opened, synchronize, reopened], so a PR opened as a draft and later marked
+    # ready would never start this job and would read as "no checks" rather than
+    # as a pass.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'registration/**'
+      - 'deploy/**'
+      - 'scripts/check-registration.mjs'
+      - '.github/workflows/gate-registration.yml'
+  workflow_dispatch:
+
+jobs:
+  registration:
+    name: Registration is deployable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.x'
+
+      # Runs bare, with nothing installed — a dependency creeping into this script
+      # is itself the regression.
+      - name: Manifest is coherent and the chart copy has not drifted
+        run: node scripts/check-registration.mjs
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.16.4
+
+      - name: Chart lints on both values overlays
+        working-directory: deploy/helm
+        run: |
+          helm lint fuzex
+          helm lint fuzex -f fuzex/values-prod.yaml
+
+      # `--set enabled=true` on purpose. values-prod.yaml ships the whole chart
+      # OFF until the image is published and the secrets are sealed, so the default
+      # render is EMPTY — and against an empty render every assertion below would
+      # pass VACUOUSLY, which is the worst possible outcome for a gate whose job is
+      # to prove the registration path exists at all. This asserts the chart is
+      # correct whenever it is switched on; it does not switch it on.
+      - name: No dangling ConfigMap, and exactly one workload registers
+        run: |
+          helm template fx deploy/helm/fuzex \
+            -f deploy/helm/fuzex/values-prod.yaml --set enabled=true \
+            -n fuzex > /tmp/rendered.yaml
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const docs = fs.readFileSync("/tmp/rendered.yaml", "utf8").split(/^---$/m);
+            const problems = [];
+
+            const configMaps = new Set();
+            for (const d of docs) {
+              if (!/^\s*kind:\s*ConfigMap\s*$/m.test(d)) continue;
+              const m = d.match(/^\s*name:\s*"?([a-z0-9][a-z0-9.-]*)"?\s*$/m);
+              if (m) configMaps.add(m[1]);
+            }
+
+            // Every configMap volume must name something this chart renders.
+            for (const d of docs) {
+              if (!/^\s*kind:\s*Deployment\s*$/m.test(d)) continue;
+              const name = (d.match(/^\s*name:\s*(\S+)/m) || [])[1];
+              for (const ref of d.matchAll(/configMap:\s*(?:\{\s*)?\n?\s*name:\s*"?([a-z0-9][a-z0-9.-]*)"?/g)) {
+                if (!configMaps.has(ref[1])) {
+                  problems.push(`${name} mounts ConfigMap "${ref[1]}", which no template in this chart renders — the pod would hang in ContainerCreating`);
+                }
+              }
+            }
+
+            const registering = docs.filter(d => /name: fuzefront-register\b/.test(d));
+            if (registering.length !== 1) {
+              problems.push(`expected exactly 1 workload with the fuzefront-register init container, found ${registering.length}`);
+            }
+
+            const cm = docs.find(d => /kind: ConfigMap/.test(d) && /name: "?fuzex-registration"?/.test(d));
+            if (!cm) problems.push("no fuzex-registration ConfigMap was rendered");
+            else {
+              for (const f of ["manifest.json", "policy.json", "register.sh"]) {
+                const src = fs.readFileSync(path.join("registration", f), "utf8");
+                const missing = src.split("\n").filter(l => l.trim() && !cm.includes("    " + l));
+                if (missing.length) problems.push(`${f}: ${missing.length} line(s) from registration/${f} are absent from the rendered ConfigMap`);
+                if (!cm.includes(`${f}: |`)) problems.push(`${f}: no such key in the rendered ConfigMap`);
+              }
+            }
+
+            if (problems.length) {
+              console.error("✘ FuzeX would deploy without registering correctly:\n");
+              for (const p of problems) console.error("  - " + p);
+              process.exit(1);
+            }
+            console.log("✔ one workload registers, every mounted ConfigMap is rendered by the chart, payload verbatim");
+          '

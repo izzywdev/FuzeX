@@ -1,0 +1,80 @@
+{
+  "name": "FuzeX",
+  "resources": [
+    {
+      "key": "Feature",
+      "name": "Design feature",
+      "actions": {
+        "read": { "name": "Read" },
+        "create": { "name": "Create" },
+        "delete": { "name": "Delete" }
+      }
+    },
+    {
+      "key": "Frame",
+      "name": "Design frame",
+      "actions": {
+        "read": { "name": "Read" },
+        "write": { "name": "Write" }
+      }
+    },
+    {
+      "key": "Flow",
+      "name": "Design flow",
+      "actions": {
+        "read": { "name": "Read" },
+        "approve": { "name": "Approve" },
+        "reject": { "name": "Reject" }
+      }
+    },
+    {
+      "key": "Stamp",
+      "name": "Content stamp",
+      "actions": {
+        "read": { "name": "Read" },
+        "write": { "name": "Write" }
+      }
+    }
+  ],
+  "roles": [
+    {
+      "key": "viewer",
+      "name": "Viewer",
+      "permissions": ["Feature:read", "Frame:read", "Flow:read", "Stamp:read"]
+    },
+    {
+      "key": "designer",
+      "name": "Designer",
+      "permissions": [
+        "Feature:read",
+        "Feature:create",
+        "Frame:read",
+        "Frame:write",
+        "Flow:read",
+        "Stamp:read",
+        "Stamp:write"
+      ]
+    },
+    {
+      "key": "approver",
+      "name": "Approver",
+      "permissions": ["Feature:read", "Frame:read", "Flow:read", "Flow:approve", "Flow:reject", "Stamp:read"]
+    },
+    {
+      "key": "admin",
+      "name": "Admin",
+      "permissions": [
+        "Feature:read",
+        "Feature:create",
+        "Feature:delete",
+        "Frame:read",
+        "Frame:write",
+        "Flow:read",
+        "Flow:approve",
+        "Flow:reject",
+        "Stamp:read",
+        "Stamp:write"
+      ]
+    }
+  ]
+}

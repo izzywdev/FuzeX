@@ -1,0 +1,16 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  creationTimestamp: null
+  name: fuzefront-registration
+  namespace: fuzex
+spec:
+  encryptedData:
+    token: AgC+INd1e9khq0Iy4Yj687xjYEZ0bMXuzjU6Jl5F++gApYxoD10SRF15X0d5hhCYMq+f0wzWTcZzAiYM6l0AnxHazOfOa4zAt2sVf168pr6aQt2u/tYui+RBazXZpkl/W2DywcFhDJDjmFqok6S7EpMrJrwTdl4aAJ8zTmQEXcAIlafv/Kz720OgQfV0hSgJdKJ+kc+yM2jEL7wn2l1O4OzEvfBbmJqXKKl/3Ebvgv/6BvZDLx1RQJ+6aU5Urmp+iJHCS9cVd8JQmq2K+EXocS4jPnfusYizMwKIcahv97yWfKeDgQ/kf2667PrBK1Gw7xKle20rIejN0mFrnLYjXkgfT+6Pvr1cNY3/UbW67ef6IWZykv9kRpmla8IJ4Bp9BPUICwf+H9Z4/r0zJYYz9CHPaUBtfbq9M+dsp8821rE4LuHqpCP7RZwuhflJRlPf1DP/0NXouBaLYs+XRgtNNFa41BBZTFpzp2HEd2ZIW7erCPi43Fq35kWoQYWVKC1CE+Jcju5IUvIdOxVqaNBALZ8Yt7DqrHVKLkGERK5DgL9CFb1xATvlRZY2FYcFWfFi994djbhObQwF+16jlZNNPve/ZK3FUDiSkFj7vnPwkQRlejGvYU9ApbPF4YrvvsgjHE4R9aKX8eHlehsMtGXKjALl8IL/shEBfVB9f1szgC5gdxGnbMi8cxFupHedwL29wXh2zN3m8tvgZyhOcgOAlwgFGlDulTqn/myZnu7uT0fTUO9acOo/LO0qcaDaWr2GBZYxX8WkjXdLxNTykgbPYMje
+  template:
+    metadata:
+      creationTimestamp: null
+      name: fuzefront-registration
+      namespace: fuzex
+    type: Opaque

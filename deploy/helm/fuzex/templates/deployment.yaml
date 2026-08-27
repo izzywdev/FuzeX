@@ -1,0 +1,170 @@
+{{- if .Values.enabled }}
+{{/*
+design-frames-service — one pod, and it is STATEFUL.
+
+WHY replicas IS NOT A VALUE AND THE STRATEGY IS Recreate.
+lib/store.js keeps every feature, frame, manifest, content stamp and per-flow
+APPROVAL as files under DESIGN_FRAMES_DATA_DIR. There is no database and no
+locking. So:
+
+  * The volume below is ReadWriteOnce, which one node may mount at a time. With
+    the default RollingUpdate the new pod would be scheduled before the old one
+    releases the claim and would sit Pending forever, taking the service down on
+    an ordinary image bump. `Recreate` terminates first, on purpose.
+  * A second replica would not merely be useless, it would be wrong: two pods
+    writing the same feature directory can interleave a manifest PUT with an
+    approval and lose one of them. Approvals are the artifact this service exists
+    to hold, and losing one silently un-approves a design that a human signed off.
+
+If this ever needs to scale horizontally, the fix is a shared store, not more
+replicas — the single-writer assumption is in lib/store.js, not in this file.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fuzex.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "fuzex.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fuzex.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- if .Values.registration.enabled }}
+        # Editing registration/manifest.json must redeploy this pod, not wait for
+        # an unrelated restart — otherwise a corrected manifest sits in git looking
+        # applied while the registry still holds the old one.
+        checksum/registration: {{ (.Files.Glob "files/registration/*").AsConfig | sha256sum }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        # The image runs as `node` (uid 1000) and the data volume must be writable
+        # by it; fsGroup is what makes a freshly-provisioned PV group-writable.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      {{- if .Values.registration.enabled }}
+      # SELF-REGISTRATION WITH FUZEFRONT — what puts FuzeX in the portal menu.
+      #
+      # Fail-closed on purpose: register.sh exits non-zero on anything unexpected,
+      # so a registration failure CrashLoopBackOffs this pod with the reason in its
+      # log. An app that starts unregistered is up, serving, and subtly broken.
+      initContainers:
+        - name: fuzefront-register
+          image: {{ .Values.registration.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ['/bin/sh', '-c']
+          args:
+            - |
+              set -eu
+              apk add --no-cache curl jq >/dev/null
+              exec /registration/register.sh
+          env:
+            # Cluster-internal service DNS, NOT the public ingress host: this
+            # container has no reason to leave the cluster, and the public host may
+            # not resolve before ingress is ready.
+            - name: FUZEFRONT_API_URL
+              value: {{ .Values.registration.apiUrl | quote }}
+            - name: FUZEFRONT_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.registration.secretName | quote }}
+                  key: token
+                  # NOT optional: a missing secret must fail the pod, not silently
+                  # skip registration and leave the app running unregistered.
+            - name: REGISTRATION_DIR
+              value: /registration
+          securityContext:
+            # apk add needs root. This container exits before the app container
+            # starts, so the app still runs as node.
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - { name: registration, mountPath: /registration, readOnly: true }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+      {{- end }}
+      containers:
+        - name: design-frames-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: DESIGN_FRAMES_HOST
+              value: "0.0.0.0"
+            - name: DESIGN_FRAMES_PORT
+              value: {{ .Values.service.port | quote }}
+            - name: DESIGN_FRAMES_DATA_DIR
+              value: {{ .Values.persistence.mountPath | quote }}
+            # DESIGN_FRAMES_WEBAPP_DIR is gone: this pod no longer serves the
+            # Module-Federation remote at all (migrated to the nginx-serving
+            # `webapp-mfe` pod, templates/webapp-mfe.yaml) — see server.js's
+            # "Module-Federation remote" comment.
+            # Write operations require a Bearer token; reads and the public /site
+            # review surface do not. Absent, EVERY write 401s — which is a safe
+            # default, not a working one, so the secret is referenced rather than
+            # defaulted, and `optional` lets the service come up read-only instead
+            # of CrashLooping on a missing token.
+            - name: DESIGN_FRAMES_API_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiTokens.existingSecret | quote }}
+                  key: {{ .Values.apiTokens.secretKey | quote }}
+                  optional: true
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ['ALL']
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "fuzex.fullname" . }}-data
+          {{- else }}
+          # emptyDir is for a throwaway local run ONLY. Every approval and stamp
+          # this service holds is lost the moment the pod restarts, so
+          # persistence.enabled MUST be true anywhere the records matter.
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.registration.enabled }}
+        - name: registration
+          configMap:
+            name: {{ .Values.registration.configMapName | quote }}
+            # 0555 = r-xr-xr-x, written in DECIMAL: defaultMode is an int32, so the
+            # literal `0555` would be read as decimal 555. register.sh is exec'd,
+            # so it must carry the execute bit.
+            defaultMode: 365
+        {{- end }}
+{{- end }}

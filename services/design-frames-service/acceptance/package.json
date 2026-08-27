@@ -1,0 +1,25 @@
+{
+  "name": "@fuzex/design-frames-acceptance",
+  "version": "0.1.0",
+  "private": true,
+  "description": "INDEPENDENT acceptance/contract test suite for design-frames-service's Postgres lifecycle tier, driven by ../openapi.yaml (v0.2.0) — NOT the backend's own in-tree tests (backend/tests/**). Exercises the REAL backend (backend/dist/app.js) against a REAL local Postgres. See docs/postgres-tier.md for the invariants this suite independently verifies.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "js-yaml": "^4.1.0",
+    "pg": "^8.23.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/izzywdev/FuzeX.git",
+    "directory": "services/design-frames-service/acceptance"
+  }
+}

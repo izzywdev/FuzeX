@@ -1,0 +1,232 @@
+name: Design Frames Service CI
+
+# CI for services/design-frames-service — kept as its own workflow (not folded
+# into ci.yml) because it has its own package.json/dependency set and should
+# not gate on, or be gated by, the Figma plugin/bridge's root-level test run.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'services/design-frames-service/**'
+      - '.github/workflows/design-frames-service-ci.yml'
+  pull_request:
+    paths:
+      - 'services/design-frames-service/**'
+      - '.github/workflows/design-frames-service-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/design-frames-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test
+        run: npm test
+
+  # INDEPENDENT contract/integration suite for the Postgres lifecycle tier
+  # (services/design-frames-service/acceptance/, driven by ../openapi.yaml),
+  # deliberately NOT the vanilla service's own `test` job above and NOT the
+  # backend's in-tree tests/integration.test.cjs — see acceptance/docs and
+  # acceptance/lib/server.cjs. Node 24 here (the backend/acceptance toolchain
+  # floor per repo CLAUDE.md) — the vanilla `test` job above stays on 20 since
+  # its own package.json still targets that floor.
+  acceptance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dfx_ci
+          POSTGRES_PASSWORD: dfx_ci
+          POSTGRES_DB: dfx_ci
+        ports:
+          - 5432:5432
+        # GitHub Actions blocks the job's steps until this reports healthy —
+        # the explicit pg_isready step below is a belt-and-braces re-check,
+        # not a substitute for it.
+        options: >-
+          --health-cmd="pg_isready -U dfx_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      # The acceptance suite's own DATABASE_URL/db/migrate.sh already
+      # documented convention: point at an already-reachable Postgres role +
+      # base database. Each acceptance test FILE then provisions and drops
+      # its own private, freshly-migrated database on this same server (see
+      # acceptance/lib/server.cjs) — the CREATEDB privilege the official
+      # postgres image's superuser role already has covers that.
+      DATABASE_URL: postgres://dfx_ci:dfx_ci@localhost:5432/dfx_ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.x'
+
+      - name: Wait for Postgres to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U dfx_ci && exit 0
+            sleep 1
+          done
+          echo "postgres never became ready" >&2
+          exit 1
+
+      - name: Apply design_frames migrations
+        working-directory: services/design-frames-service
+        run: bash db/migrate.sh
+
+      # Backend's package.json depends on "@fuzex/identity": "file:../../../packages/identity"
+      # (a symlinked local package) and its `dist/` is gitignored — build it
+      # before the backend, and before the acceptance suite's own direct
+      # require of packages/identity/dist/index.js (tests/07-frame-refs-gap.test.cjs).
+      - name: Build packages/identity
+        working-directory: packages/identity
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build design-frames-service backend
+        working-directory: services/design-frames-service/backend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Install acceptance suite dependencies
+        working-directory: services/design-frames-service/acceptance
+        run: npm install --no-audit --no-fund
+
+      - name: Run acceptance suite against the real backend + real Postgres
+        working-directory: services/design-frames-service/acceptance
+        run: npm test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      # webapp/'s `npm install` (builder stage) pulls the private
+      # @izzywdev/fuzefront-design-system from GitHub Packages; the default
+      # Actions token needs read:packages, and the package itself must grant
+      # this repo Actions access (see release.yml for the full caveat).
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build image (no push — build-only smoke check)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker buildx build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            --load \
+            -t design-frames-service:ci \
+            services/design-frames-service
+      - name: Smoke-check the built image serves /health (MF remote moved to webapp-mfe)
+        run: |
+          docker run -d --name dfs-smoke -p 4400:4400 -e DESIGN_FRAMES_API_TOKENS=ci-smoke design-frames-service:ci
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:4400/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4400/health
+          # This image no longer serves the Module-Federation remote at all
+          # (nginx-serving-stage migration — see server.js's "Module-Federation
+          # remote" comment and the webapp-mfe smoke check below). Assert the
+          # 404 explicitly so a regression that re-adds serving here — putting
+          # two sources of truth for /apps/fuzex/ back in the repo — fails CI
+          # instead of silently passing.
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4400/apps/fuzex/remoteEntry.js)
+          docker logs dfs-smoke
+          docker rm -f dfs-smoke
+          if [ "$status" != "404" ]; then
+            echo "::error::design-frames-service still serves /apps/fuzex/remoteEntry.js (got HTTP $status) — the Module-Federation remote must be served ONLY by the webapp-mfe nginx image now."
+            exit 1
+          fi
+
+      # Postgres LIFECYCLE TIER (services/design-frames-service/backend/ + db/,
+      # docs/postgres-tier.md) — a separate build target in the same
+      # Dockerfile (`postgres-tier`), smoke-checked separately from the
+      # vanilla image above. No DATABASE_URL is supplied here on purpose:
+      # backend/src/app.ts's /health route never touches the pg pool
+      # (backend/src/lib/db.ts connects lazily, on first query), so this
+      # proves the tier boots and serves without needing a live Postgres —
+      # that needs a real DATABASE_URL, which is FuzeInfra's to provision,
+      # never this repo's.
+      - name: Build design-frames-service postgres-tier image (no push — build-only smoke check)
+        run: |
+          docker buildx build \
+            --build-context identity=./packages/identity \
+            --target postgres-tier \
+            --load \
+            -t design-frames-postgres-tier:ci \
+            services/design-frames-service
+      - name: Smoke-check the postgres-tier image serves /health (no DATABASE_URL required)
+        run: |
+          docker run -d --name dfs-pg-smoke -p 4410:4410 design-frames-postgres-tier:ci
+          ok=
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4410/health && { ok=1; break; }
+            sleep 1
+          done
+          # ALWAYS dump the container's logs before asserting pass/fail — a
+          # crash-on-boot (e.g. a MODULE_NOT_FOUND from a broken node_modules
+          # symlink) exits the container long before /health ever answers,
+          # and the previous form here let the final bare `curl -sf` fail
+          # first under `set -e`, which skipped `docker logs` entirely and
+          # threw away the one thing that would have explained the failure.
+          echo "----- container logs -----"
+          docker logs dfs-pg-smoke || true
+          docker rm -f dfs-pg-smoke || true
+          test -n "$ok"
+
+      # webapp-mfe — the Module-Federation remote's family-standard
+      # nginx-serving-stage image (Dockerfile's `webapp-mfe` target). Same
+      # GitHub Packages build-secret need as the vanilla image's
+      # webapp-builder stage (webapp/'s private @izzywdev/fuzefront-design-system
+      # dependency).
+      - name: Build webapp-mfe image (no push — build-only smoke check)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker buildx build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            --target webapp-mfe \
+            --load \
+            -t design-frames-webapp-mfe:ci \
+            services/design-frames-service
+      - name: Smoke-check webapp-mfe serves /health and the MF remote at /apps/fuzex/
+        run: |
+          # Container port 8080, not 80: the webapp-mfe stage runs on
+          # nginxinc/nginx-unprivileged (uid 101), which cannot bind a
+          # privileged port. This is the FOURTH place that port is written
+          # down -- Dockerfile EXPOSE/HEALTHCHECK, nginx.conf `listen`, the
+          # chart's containerPort, and here. Missing this one is what made
+          # this smoke test fail while the other three already agreed.
+          docker run -d --name dfs-webapp-mfe-smoke -p 4401:8080 design-frames-webapp-mfe:ci
+          ok=
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:4401/health && { ok=1; break; }
+            sleep 1
+          done
+          # webapp/'s build actually landed in the image and nginx serves it at
+          # /apps/fuzex/ (nginx.conf's `location ^~ /apps/fuzex/` aliasing the
+          # flat docroot) — catches the builder stage silently producing an
+          # empty dist/, the Dockerfile's COPY layout disagreeing with the
+          # nginx.conf alias, or vite's `base`/`assetsDir` drifting from both.
+          curl -sf http://127.0.0.1:4401/apps/fuzex/remoteEntry.js | head -c 200 || ok=
+          echo "----- container logs -----"
+          docker logs dfs-webapp-mfe-smoke || true
+          docker rm -f dfs-webapp-mfe-smoke || true
+          test -n "$ok"
