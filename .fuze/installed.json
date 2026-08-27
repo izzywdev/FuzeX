@@ -145,8 +145,8 @@
       "capability": "skills",
       "mode": "managed",
       "sourcePath": "skills/fuzefront-ui-package/SKILL.md",
-      "sourceSha256": "772c7031eca212e59f8509b8a4e773c975aeb5f63b6595d549c96f9c127af600",
-      "renderedSha256": "772c7031eca212e59f8509b8a4e773c975aeb5f63b6595d549c96f9c127af600"
+      "sourceSha256": "516db73f20f26cbf99f2b37b5adc48f2d7c192e61612092570f2ca97ee41b9b8",
+      "renderedSha256": "516db73f20f26cbf99f2b37b5adc48f2d7c192e61612092570f2ca97ee41b9b8"
     },
     ".claude/skills/logging/SKILL.md": {
       "capability": "skills",
@@ -348,22 +348,22 @@
       "capability": "skills",
       "mode": "managed",
       "sourcePath": "skills/ticket-reviewer/story/SKILL.md",
-      "sourceSha256": "a832ba5f191a5b3277fb9b0b4c09343fe5b7363104adf8eb960f132f7297a722",
-      "renderedSha256": "a832ba5f191a5b3277fb9b0b4c09343fe5b7363104adf8eb960f132f7297a722"
+      "sourceSha256": "be0043762f722202fdea7456de91553e18769ad5cbac4caad292d51a69a3c15a",
+      "renderedSha256": "be0043762f722202fdea7456de91553e18769ad5cbac4caad292d51a69a3c15a"
     },
     ".claude/skills/ui-frame-contract/SKILL.md": {
       "capability": "skills",
       "mode": "managed",
       "sourcePath": "skills/ui-frame-contract/SKILL.md",
-      "sourceSha256": "42f37f74cc1d3e81feb72c2fdf123a40e4a90f1bc30045649fbadf4ac932f92d",
-      "renderedSha256": "42f37f74cc1d3e81feb72c2fdf123a40e4a90f1bc30045649fbadf4ac932f92d"
+      "sourceSha256": "6a8ae1935e5ad0cc95c7b5c908472eacd2008365a7a5e6028decfaedec264cc7",
+      "renderedSha256": "6a8ae1935e5ad0cc95c7b5c908472eacd2008365a7a5e6028decfaedec264cc7"
     },
     ".claude/skills/ui-runtime-validation/SKILL.md": {
       "capability": "skills",
       "mode": "managed",
       "sourcePath": "skills/ui-runtime-validation/SKILL.md",
-      "sourceSha256": "9a025e7dec7ddd21b72374676adea53d3e16136d4f6fec735f6b2b778540ec10",
-      "renderedSha256": "9a025e7dec7ddd21b72374676adea53d3e16136d4f6fec735f6b2b778540ec10"
+      "sourceSha256": "d4ece676018ede802b8e1432196181cd83985c7ba8212d465ca97bee7b105ee5",
+      "renderedSha256": "d4ece676018ede802b8e1432196181cd83985c7ba8212d465ca97bee7b105ee5"
     },
     ".claude/skills/verification-protocol/SKILL.md": {
       "capability": "skills",
@@ -385,6 +385,13 @@
       "sourcePath": "governance/repo-manifest.schema.json",
       "sourceSha256": "0609a29df35b0adb8fbda5c15a695a693bc09fb6d01b40bc19b933d23fc249d5",
       "renderedSha256": "0609a29df35b0adb8fbda5c15a695a693bc09fb6d01b40bc19b933d23fc249d5"
+    },
+    ".github/actionlint.yaml": {
+      "capability": "community",
+      "mode": "seeded",
+      "sourcePath": "community-templates/actionlint.yaml",
+      "sourceSha256": "e7d79fcb347702b9fbbe2448c45e70f47a6bcd04dde3e4d142b2bfcb59983dfc",
+      "renderedSha256": "e7d79fcb347702b9fbbe2448c45e70f47a6bcd04dde3e4d142b2bfcb59983dfc"
     },
     ".github/labels.json": {
       "capability": "community",
@@ -804,12 +811,33 @@
       "sourceSha256": "2bc7dd099bdd3c17b32790654f3773aed788eac9319b9cbc6325e36911d87a31",
       "renderedSha256": "2bc7dd099bdd3c17b32790654f3773aed788eac9319b9cbc6325e36911d87a31"
     },
+    "packages/identity/.npmrc": {
+      "capability": "npm-registry",
+      "mode": "seeded",
+      "sourcePath": "community-templates/npmrc",
+      "sourceSha256": "0bb8e667badce60e17b264f6bb6a6ec672edc27118427470729b045bd817155b",
+      "renderedSha256": "0bb8e667badce60e17b264f6bb6a6ec672edc27118427470729b045bd817155b"
+    },
+    "packages/identity/package.json": {
+      "capability": "node-toolchain",
+      "mode": "derived",
+      "sourcePath": "",
+      "sourceSha256": "582e9e802e923ea8ce7979f61169327d79e0d461ee5babdfefc1d86c78d9a172",
+      "renderedSha256": "582e9e802e923ea8ce7979f61169327d79e0d461ee5babdfefc1d86c78d9a172"
+    },
+    "scripts/__tests__/test_gate_api_version.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_api_version.py",
+      "sourceSha256": "5b40f290317dc2d894c364b5c72d261d044ba139faa415a662b70b69959f3968",
+      "renderedSha256": "5b40f290317dc2d894c364b5c72d261d044ba139faa415a662b70b69959f3968"
+    },
     "scripts/__tests__/test_gate_identifier.py": {
       "capability": "entity-identity",
       "mode": "managed",
       "sourcePath": "scripts/__tests__/test_gate_identifier.py",
-      "sourceSha256": "d6b01fc736d59e4d1f1f8591f16f03cd4d1faa3a4b7bb422a155c13eb0040723",
-      "renderedSha256": "d6b01fc736d59e4d1f1f8591f16f03cd4d1faa3a4b7bb422a155c13eb0040723"
+      "sourceSha256": "17d58a407e607fd34ac674927c69e44484ca02d55c404ca8caafe2ca5dd5f64b",
+      "renderedSha256": "17d58a407e607fd34ac674927c69e44484ca02d55c404ca8caafe2ca5dd5f64b"
     },
     "scripts/build-frames-site.mjs": {
       "capability": "workflows",
@@ -822,22 +850,29 @@
       "capability": "portal-registration",
       "mode": "managed",
       "sourcePath": "scripts/check-registration.mjs",
-      "sourceSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b",
-      "renderedSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b"
+      "sourceSha256": "678f28960b51f30a4cb64a5fd27058e2288fde9e7625bb949a21d1940cd4f277",
+      "renderedSha256": "678f28960b51f30a4cb64a5fd27058e2288fde9e7625bb949a21d1940cd4f277"
+    },
+    "scripts/gate_api_version.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_api_version.py",
+      "sourceSha256": "9ec6adda8c36df9397c7007285710a6f4af242151fc50d44b543e6d52956d41a",
+      "renderedSha256": "9ec6adda8c36df9397c7007285710a6f4af242151fc50d44b543e6d52956d41a"
     },
     "scripts/gate_ds_conformance.py": {
       "capability": "design-system",
       "mode": "managed",
       "sourcePath": "scripts/gate_ds_conformance.py",
-      "sourceSha256": "2155d4d75c739c1cf20ef03f3a364e66d8d4d0e47d9aa6844014caa82bfc1844",
-      "renderedSha256": "2155d4d75c739c1cf20ef03f3a364e66d8d4d0e47d9aa6844014caa82bfc1844"
+      "sourceSha256": "fbedf04a6aa91033e0513b00d59184fbe132d76d3d04ad3259efd22b9e0830b3",
+      "renderedSha256": "fbedf04a6aa91033e0513b00d59184fbe132d76d3d04ad3259efd22b9e0830b3"
     },
     "scripts/gate_identifier.py": {
       "capability": "entity-identity",
       "mode": "managed",
       "sourcePath": "scripts/gate_identifier.py",
-      "sourceSha256": "ca1f8bfc2701346e949f1aa669fc4ace9a9586927379870e8dd67effe5d58ac8",
-      "renderedSha256": "ca1f8bfc2701346e949f1aa669fc4ace9a9586927379870e8dd67effe5d58ac8"
+      "sourceSha256": "ae5f4b8d2c1a8390e1339adb269232754c95b2ad0801c751c29e6dcd02cd4aaf",
+      "renderedSha256": "ae5f4b8d2c1a8390e1339adb269232754c95b2ad0801c751c29e6dcd02cd4aaf"
     },
     "scripts/gate_manifest.py": {
       "capability": "schema-validate",
@@ -864,8 +899,8 @@
       "capability": "portal-registration",
       "mode": "managed",
       "sourcePath": "scripts/sync-chart-files.sh",
-      "sourceSha256": "1d6a570f53a8ad1b0fd76b383fe4d54329a6f6568a150d8d0a07d7d2c0bd8534",
-      "renderedSha256": "1d6a570f53a8ad1b0fd76b383fe4d54329a6f6568a150d8d0a07d7d2c0bd8534"
+      "sourceSha256": "b53985271e99279897baa5f3ae229e2676400e5ae2b2944a692cf0f54bde9d57",
+      "renderedSha256": "b53985271e99279897baa5f3ae229e2676400e5ae2b2944a692cf0f54bde9d57"
     },
     "services/design-frames-service/.npmrc": {
       "capability": "npm-registry",
@@ -873,6 +908,34 @@
       "sourcePath": "community-templates/npmrc",
       "sourceSha256": "0dc82809c288fc8380df0d3701f3abe8bbb594860f7425ab97a0f82bd69469fc",
       "renderedSha256": "0dc82809c288fc8380df0d3701f3abe8bbb594860f7425ab97a0f82bd69469fc"
+    },
+    "services/design-frames-service/acceptance/.npmrc": {
+      "capability": "npm-registry",
+      "mode": "seeded",
+      "sourcePath": "community-templates/npmrc",
+      "sourceSha256": "0bb8e667badce60e17b264f6bb6a6ec672edc27118427470729b045bd817155b",
+      "renderedSha256": "0bb8e667badce60e17b264f6bb6a6ec672edc27118427470729b045bd817155b"
+    },
+    "services/design-frames-service/acceptance/package.json": {
+      "capability": "node-toolchain",
+      "mode": "derived",
+      "sourcePath": "",
+      "sourceSha256": "3fecb057b2b419ffc94d0b7c2b7a9e6a56853acc8986f002ffaa051a300a79c7",
+      "renderedSha256": "3fecb057b2b419ffc94d0b7c2b7a9e6a56853acc8986f002ffaa051a300a79c7"
+    },
+    "services/design-frames-service/backend/.npmrc": {
+      "capability": "npm-registry",
+      "mode": "seeded",
+      "sourcePath": "community-templates/npmrc",
+      "sourceSha256": "0bb8e667badce60e17b264f6bb6a6ec672edc27118427470729b045bd817155b",
+      "renderedSha256": "0bb8e667badce60e17b264f6bb6a6ec672edc27118427470729b045bd817155b"
+    },
+    "services/design-frames-service/backend/package.json": {
+      "capability": "node-toolchain",
+      "mode": "derived",
+      "sourcePath": "",
+      "sourceSha256": "9972415155847b643d579f13227218ae39e51110e661d167daff21c7ffb4b62e",
+      "renderedSha256": "9972415155847b643d579f13227218ae39e51110e661d167daff21c7ffb4b62e"
     },
     "services/design-frames-service/package.json": {
       "capability": "node-toolchain",

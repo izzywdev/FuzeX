@@ -1,31 +1,83 @@
 #!/usr/bin/env node
 /**
- * Guards the AuthZ-policy half of FuzeFront registration. Zero dependencies —
- * runs on a bare `actions/setup-node` with no install step.
+ * Guards FuzeFront registration end to end. Zero dependencies — runs on a bare
+ * `actions/setup-node` with no install step.
  *
  *   node scripts/check-registration.mjs
  *
- * Two checks, for the two ways this silently breaks:
+ * Four checks, for the four ways this silently breaks:
  *
- * 1. `registration/policy.json` is VALID against FuzeFront's frozen ProductPolicy
+ * 1. `registration/manifest.json`'s `nav.section` is a real NavSection. This is a
+ *    production-incident-derived guard: FuzeFinance once shipped `nav.section:
+ *    "business"` — a perfectly plausible name that is not in the enum — and every
+ *    existing gate passed it, because `@fuzefront/onboarding-kit`'s
+ *    validate-registration.mjs is an opt-in npm-installed fleet-policy checker, not
+ *    something every repo runs, and nothing dependency-free re-validated the shape.
+ *    The platform parses the manifest with `registerAppRequestSchema.safeParse`
+ *    (FuzeFront `backend/applications/src/app-registry/manifest.schema.ts`), whose
+ *    `nav.section` is `z.enum(NAV_SECTIONS)` — an unknown section fails the parse,
+ *    `POST /apps` answers 400, and register.sh treats any non-201/409 as fatal, so
+ *    the pod CrashLoopBackOffs and the product never appears in the portal. That is
+ *    a symptom nobody reads as "bad nav.section" — it reads as "the app is broken".
+ *
+ * 2. `registration/policy.json` is VALID against FuzeFront's frozen ProductPolicy
  *    contract. An invalid policy is rejected with a 400 inside an init container at
  *    deploy time — an error in a pod log nobody tails. A policy that is *accepted*
  *    but whose role names an action the document never declares is worse: nothing
  *    errors anywhere, Permit creates the role, and it grants nothing. The symptom is
  *    "our users have no permissions", which reads as a bug in this app.
  *
- * 2. The registration ConfigMap actually SHIPS that policy, byte-equivalent. The
+ * 3. The registration ConfigMap actually SHIPS that policy, byte-equivalent. The
  *    ConfigMap inlines its own copies of the registration files, so the file in this
  *    repo is decorative unless the ConfigMap carries it — which is exactly how this
  *    app ended up with a committed, correct policy.json that no deploy ever sent.
  *
+ * 4. The DISPLAY NAME does not carry the `Fuze` prefix. Cosmetic on its own; the
+ *    reason it is a gate is that the rule it replaces was ENFORCED BACKWARDS. Four
+ *    repos shipped a repo-local check that rejected a `fuze`-prefixed SLUG and told
+ *    the author to migrate — and because `slug` is immutable, "migrate" means
+ *    register-a-second-app-then-delete-the-first, which orphans the product's Permit
+ *    grants and CASCADE-deletes its app_installations rows. A gate that pushes people
+ *    toward an irreversible migration is worse than no gate. Owner ruling 2026-08-19:
+ *    the prefix STAYS on the slug and comes OFF the display string. See §4 below.
+ *
  * Mirrors bin/validate-policy.mjs in @fuzefront/onboarding-kit. Keep in step with it.
+ *
+ * History: this file used to check ONLY #2 and #3. Several repos (FuzeExecutive,
+ * FuzeBI, among others) had their OWN repo-local check-registration.mjs that also
+ * caught #1 — written after the FuzeFinance CrashLoopBackOff above. The installer's
+ * `--adopt-canonical` replaced those repo-local scripts with this one, silently
+ * dropping #1 from every repo that received it, while gate-registration.yml kept
+ * calling this script and kept claiming the nav.section guarantee in its header —
+ * green, and enforcing nothing. #1 is restored here, in the canonical, so the whole
+ * fleet gets it back in one place instead of forking it again per repo.
  */
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+const MANIFEST_PATH = 'registration/manifest.json'
 const POLICY_PATH = 'registration/policy.json'
+
+// Mirrors `NAV_SECTIONS` in FuzeFront's
+// `backend/applications/src/app-registry/manifest.schema.ts` (also exported as the
+// `NavSection` enum in `packages/onboarding-kit/manifest.schema.json`). The ARRAY
+// ORDER is the portal's render order — the side menu groups by lifecycle stage:
+// steer -> plan -> build -> sell -> serve -> measure -> operate. Confirmed
+// identical, independently, in FuzeExecutive's and FuzeBI's own (now-superseded)
+// repo-local check-registration.mjs before this file absorbed the check. There is
+// no dependency-free way to import the enum across repos, so it is vendored here
+// deliberately — if FuzeFront ever changes it, this constant is the place to
+// update, same as those two scripts were.
+const NAV_SECTIONS = [
+  'executive',
+  'plan',
+  'build',
+  'revenue',
+  'customer',
+  'insight',
+  'platform',
+]
 
 // `_` is the `<slug>_<Key>` namespace separator FuzeFront prepends; a bare key
 // containing one could not be split back apart.
@@ -36,7 +88,93 @@ const TOP_LEVEL = new Set(['product', 'name', 'resources', 'roles'])
 const problems = []
 const fail = m => problems.push(m)
 
-// ── 1. the policy itself ──────────────────────────────────────────────────────
+// ── 1. nav.section is a real NavSection ───────────────────────────────────────
+let manifest = null
+if (!existsSync(MANIFEST_PATH)) {
+  fail(`${MANIFEST_PATH} is missing — this app declares no placement to FuzeFront`)
+} else {
+  const raw = readFileSync(MANIFEST_PATH, 'utf8')
+  try {
+    manifest = JSON.parse(raw)
+  } catch (err) {
+    fail(`${MANIFEST_PATH} is not valid JSON — ${err.message}`)
+  }
+}
+
+let navSection = null
+if (manifest) {
+  const nav = manifest.nav
+  const section = nav && typeof nav === 'object' ? nav.section : undefined
+  if (section === undefined) {
+    fail(
+      `${MANIFEST_PATH}: nav.section is absent — the app sorts LAST, in "platform", by ` +
+        `platform default rather than by decision. Valid: ${NAV_SECTIONS.join(', ')}`
+    )
+  } else if (typeof section !== 'string' || !NAV_SECTIONS.includes(section)) {
+    fail(
+      `${MANIFEST_PATH}: nav.section ${JSON.stringify(section)} is not a NavSection. ` +
+        'The platform parses the manifest with `z.enum(NAV_SECTIONS)`, so `POST /apps` ' +
+        'answers 400, register.sh treats that as fatal, and the pod CrashLoopBackOffs — ' +
+        `the product never registers at all. Valid, in menu order: ${NAV_SECTIONS.join(', ')}`
+    )
+  } else {
+    navSection = section
+  }
+}
+
+// ── 1b. the display name is de-prefixed ──────────────────────────────────────
+// NAMING CONVENTION, corrected 2026-08-19 by owner ruling:
+//
+//     slug: "fuzeservice"    name: "Service"    menuLabel: "Service"
+//
+// The prefix STAYS on the slug and comes OFF the display string. The convention was
+// never about the URL — it was that a launcher listing fifteen products all beginning
+// "Fuze" is unreadable, which is a property of the RENDERED LABEL. The slug keeps the
+// prefix where it does useful work: unambiguous in a Permit key (`<slug>_<Resource>`),
+// a billing product key, and an `/app/<slug>` path, in a family where `deploy`,
+// `market` and `call` are generic enough to collide with something else one day.
+//
+// THE SLUG IS DELIBERATELY NOT CHECKED, IN EITHER DIRECTION, and that is the whole
+// point of adding this here. FuzeDeploy, FuzeCall, FuzeExecutive and FuzeFinance each
+// carried a repo-local rule that REJECTED a prefixed slug. `slug` is immutable — the
+// contract has no rename — so the only way to act on that error is to register a
+// second app and delete the first, orphaning Permit grants and CASCADE-deleting
+// app_installations rows. Failing a build over a value nobody can safely change does
+// not prevent the mistake; it pressures someone into a destructive migration.
+//
+// The field is also already split across the fleet, and all of it is live. Measured on
+// default branches 2026-08-19: `fuzex` and `fuzebi` carry the prefix; `deploy`, `call`,
+// `executive`, `finance`, `keys`, `market` and `picker` do not. None are to be
+// migrated. An error in EITHER direction reds a real repo with no safe remedy.
+//
+// `name` and `menuLabel` are the opposite case in every respect: mutable, re-sent by
+// register.sh on every pod start, fixed with a one-line edit and no registry surgery.
+// BOTH are checked, not just `name` — FuzeBI today reads menuLabel "BI" (already
+// right) with name "FuzeBI" (not), which is exactly the half-fix that checking a
+// single field would bless.
+//
+// This lives in the CANONICAL on purpose. The four repos above were fixed in place,
+// but `--adopt-canonical` overwrites a repo-local check-registration.mjs with this
+// file — the same way it silently dropped the nav.section check documented above. A
+// rule that exists only in the consuming repos is a rule that gets deleted by the next
+// reconcile.
+const FUZE_PREFIX_RE = /^fuze/i
+if (manifest) {
+  for (const field of ['name', 'menuLabel']) {
+    const value = manifest[field]
+    if (typeof value === 'string' && FUZE_PREFIX_RE.test(value)) {
+      fail(
+        `${MANIFEST_PATH}: ${field} ${JSON.stringify(value)} carries the "Fuze" prefix — ` +
+          `use ${JSON.stringify(value.replace(FUZE_PREFIX_RE, '') || '<Product>')}. Every ` +
+          'product in the launcher already sits inside FuzeFront, so prefixing each tile ' +
+          'makes the list unscannable. Unlike `slug`, this is a plain edit: the field is ' +
+          'mutable and register.sh re-sends it on the next pod start.'
+      )
+    }
+  }
+}
+
+// ── 2. the policy itself ──────────────────────────────────────────────────────
 if (!existsSync(POLICY_PATH)) {
   fail(`${POLICY_PATH} is missing — this app declares no roles to FuzeFront`)
 }
@@ -102,7 +240,7 @@ if (policy) {
   }
 }
 
-// ── 2. the ConfigMap actually ships it ────────────────────────────────────────
+// ── 3. the ConfigMap actually ships it ────────────────────────────────────────
 function findConfigMaps(dir, found = []) {
   if (!existsSync(dir)) return found
   for (const entry of readdirSync(dir)) {
@@ -136,8 +274,16 @@ const SUBMITS_POLICY = /apps\/\$\{?SLUG\}?\/policy|apps\/\$SLUG\/policy/
  */
 function shippedContent(cmPath, cmText, key) {
   const lines = cmText.split('\n')
+  // replaceAll, not replace: `replace` with a STRING pattern substitutes only the
+  // FIRST match, so a key with two dots ('a.b.c') kept its second dot unescaped and
+  // it stayed a regex wildcard. Latent rather than live -- both call sites pass a
+  // single-dot literal ('policy.json', 'register.sh') -- but it is a footgun for the
+  // next key added.
+  //
+  // Not a ReDoS despite what a scanner may say about non-literal RegExp: `key` is a
+  // hardcoded literal at every call site, never user input.
   const start = lines.findIndex(l =>
-    new RegExp(`^  ${key.replace('.', '\\.')}:\\s*\\|`).test(l)
+    new RegExp(`^  ${key.replaceAll('.', '\\.')}:\\s*\\|`).test(l)
   )
   if (start === -1) return null
 
@@ -208,6 +354,7 @@ if (problems.length) {
   process.exit(1)
 }
 console.log(
-  `✔ registration OK — ${policy.resources.length} resource(s), ${policy.roles.length} ` +
-    `role(s), shipped by ${configMaps.length} ConfigMap(s) and submitted by register.sh`
+  `✔ registration OK — nav "${navSection}", ${policy.resources.length} resource(s), ` +
+    `${policy.roles.length} role(s), shipped by ${configMaps.length} ConfigMap(s) and ` +
+    'submitted by register.sh'
 )
