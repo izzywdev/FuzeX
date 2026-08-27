@@ -31,6 +31,85 @@ jobs:
       - name: Test
         run: npm test
 
+  # INDEPENDENT contract/integration suite for the Postgres lifecycle tier
+  # (services/design-frames-service/acceptance/, driven by ../openapi.yaml),
+  # deliberately NOT the vanilla service's own `test` job above and NOT the
+  # backend's in-tree tests/integration.test.cjs — see acceptance/docs and
+  # acceptance/lib/server.cjs. Node 24 here (the backend/acceptance toolchain
+  # floor per repo CLAUDE.md) — the vanilla `test` job above stays on 20 since
+  # its own package.json still targets that floor.
+  acceptance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dfx_ci
+          POSTGRES_PASSWORD: dfx_ci
+          POSTGRES_DB: dfx_ci
+        ports:
+          - 5432:5432
+        # GitHub Actions blocks the job's steps until this reports healthy —
+        # the explicit pg_isready step below is a belt-and-braces re-check,
+        # not a substitute for it.
+        options: >-
+          --health-cmd="pg_isready -U dfx_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      # The acceptance suite's own DATABASE_URL/db/migrate.sh already
+      # documented convention: point at an already-reachable Postgres role +
+      # base database. Each acceptance test FILE then provisions and drops
+      # its own private, freshly-migrated database on this same server (see
+      # acceptance/lib/server.cjs) — the CREATEDB privilege the official
+      # postgres image's superuser role already has covers that.
+      DATABASE_URL: postgres://dfx_ci:dfx_ci@localhost:5432/dfx_ci
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.x'
+
+      - name: Wait for Postgres to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U dfx_ci && exit 0
+            sleep 1
+          done
+          echo "postgres never became ready" >&2
+          exit 1
+
+      - name: Apply design_frames migrations
+        working-directory: services/design-frames-service
+        run: bash db/migrate.sh
+
+      # Backend's package.json depends on "@fuzex/identity": "file:../../../packages/identity"
+      # (a symlinked local package) and its `dist/` is gitignored — build it
+      # before the backend, and before the acceptance suite's own direct
+      # require of packages/identity/dist/index.js (tests/07-frame-refs-gap.test.cjs).
+      - name: Build packages/identity
+        working-directory: packages/identity
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build design-frames-service backend
+        working-directory: services/design-frames-service/backend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Install acceptance suite dependencies
+        working-directory: services/design-frames-service/acceptance
+        run: npm install --no-audit --no-fund
+
+      - name: Run acceptance suite against the real backend + real Postgres
+        working-directory: services/design-frames-service/acceptance
+        run: npm test
+
   docker-build:
     runs-on: ubuntu-latest
     needs: test
