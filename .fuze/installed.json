@@ -836,8 +836,8 @@
       "capability": "entity-identity",
       "mode": "managed",
       "sourcePath": "scripts/__tests__/test_gate_identifier.py",
-      "sourceSha256": "17d58a407e607fd34ac674927c69e44484ca02d55c404ca8caafe2ca5dd5f64b",
-      "renderedSha256": "17d58a407e607fd34ac674927c69e44484ca02d55c404ca8caafe2ca5dd5f64b"
+      "sourceSha256": "d6b01fc736d59e4d1f1f8591f16f03cd4d1faa3a4b7bb422a155c13eb0040723",
+      "renderedSha256": "d6b01fc736d59e4d1f1f8591f16f03cd4d1faa3a4b7bb422a155c13eb0040723"
     },
     "scripts/build-frames-site.mjs": {
       "capability": "workflows",
@@ -850,8 +850,8 @@
       "capability": "portal-registration",
       "mode": "managed",
       "sourcePath": "scripts/check-registration.mjs",
-      "sourceSha256": "678f28960b51f30a4cb64a5fd27058e2288fde9e7625bb949a21d1940cd4f277",
-      "renderedSha256": "678f28960b51f30a4cb64a5fd27058e2288fde9e7625bb949a21d1940cd4f277"
+      "sourceSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b",
+      "renderedSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b"
     },
     "scripts/gate_api_version.py": {
       "capability": "workflows",
@@ -871,8 +871,8 @@
       "capability": "entity-identity",
       "mode": "managed",
       "sourcePath": "scripts/gate_identifier.py",
-      "sourceSha256": "ae5f4b8d2c1a8390e1339adb269232754c95b2ad0801c751c29e6dcd02cd4aaf",
-      "renderedSha256": "ae5f4b8d2c1a8390e1339adb269232754c95b2ad0801c751c29e6dcd02cd4aaf"
+      "sourceSha256": "ca1f8bfc2701346e949f1aa669fc4ace9a9586927379870e8dd67effe5d58ac8",
+      "renderedSha256": "ca1f8bfc2701346e949f1aa669fc4ace9a9586927379870e8dd67effe5d58ac8"
     },
     "scripts/gate_manifest.py": {
       "capability": "schema-validate",
