@@ -1,0 +1,11 @@
+# actionlint cannot know the names of self-hosted runners, so `runs-on: <scale-set>`
+# reads to it as an unknown label, and gate-actionlint is an ENFORCING required check.
+# Without this file, the first repo to declare ci.runner blocks every one of its PRs.
+#
+# These are gha-runner-scale-set NAMES matched as bare strings, not labels in the legacy
+# `[self-hosted, x]` sense — see governance/ci-runners.md.
+#
+# SEEDED: add your repo's own runner names here if it has any beyond the canonical set.
+self-hosted-runner:
+  labels:
+    - fuze-runner
