@@ -36,7 +36,7 @@
 enabled: true
 
 image:
-  tag: "6aa1c11f6aff"
+  tag: "73d5ae9da474"
   pullPolicy: Always
 
 # No imagePullSecrets. A prior revision of this file referenced a secret named
@@ -71,7 +71,7 @@ webappMfe:
   image:
     # WEBAPP_MFE_IMAGE_TAG — bumped by release.yml's webapp-mfe build job the
     # same way image.tag above is bumped. DO NOT edit by hand.
-    tag: "0.1.0"
+    tag: "73d5ae9da474"
     pullPolicy: Always
 
 # =============================================================================
@@ -89,7 +89,7 @@ postgresTier:
   image:
     # POSTGRES_TIER_IMAGE_TAG — bumped by release.yml's postgres-tier build
     # job the same way image.tag above is bumped. DO NOT edit by hand.
-    tag: "0.1.0"
+    tag: "73d5ae9da474"
     pullPolicy: Always
 
 # Same-origin portal mount. WITHOUT THIS THE APP CANNOT LOAD IN THE PORTAL:
