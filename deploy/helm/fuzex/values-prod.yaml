@@ -15,18 +15,27 @@
 #      (deploy/argocd/sealed/fuzefront-registration.yaml). The registration init
 #      container is fail-closed by design, so this was a hard prerequisite.
 #
+# NOW ENABLED — the same-origin portal mount (this is what makes the MFE load
+# inside the FuzeFront portal, mirroring how FuzeFinance mounts its remote):
+#   - federatedMount.enabled / .host are ON below (host: app.fuzefront.com). This
+#     is the /apps/fuzex Ingress the portal shell imports the remote through; see
+#     the federatedMount block's own comment for the full rationale. It reuses
+#     FuzeFront's EXISTING host via a same-origin path route, so it needs no new
+#     DNS. It does place a second namespace's Ingress object against
+#     app.fuzefront.com, so it must compose with FuzeFront's own host Ingress
+#     rules — and FuzeX must stay OUT of FuzeFront's prefix-stripping
+#     `federatedApps` loop (that loop strips /apps/fuzex and would 404 every
+#     chunk of a remote built with base '/apps/fuzex/'). This is a pass-through
+#     mount owned by this repo, not a host-loop entry.
+#
 # STILL DEFERRED, deliberately NOT part of this change:
 #   - `fuzex-api-tokens` (key DESIGN_FRAMES_API_TOKENS) is not sealed. Not a
 #     blocker — `apiTokens` is wired `optional: true` in the pod spec, so the
 #     service comes up read-only (every write 401s) rather than CrashLooping.
-#   - ingress.enabled / ingress.host and federatedMount.enabled / .host stay OFF.
-#     ingress.host needs new DNS + a Cloudflare tunnel rule for a *.prod host —
-#     a FuzeInfra change, not this repo's to assume. federatedMount would reuse
-#     FuzeFront's EXISTING host (app.fuzefront.com) via a same-origin path route,
-#     so it needs no new DNS, but adding a second namespace's Ingress object
-#     against that host is a cross-repo routing decision (coordinate with
-#     FuzeFront's own app.fuzefront.com Ingress rules first) and is out of scope
-#     for this PR, which is about standing up the namespace + workload only.
+#   - ingress.enabled / ingress.host — the STANDALONE public origin, distinct
+#     from the portal mount above — stay OFF: ingress.host needs new DNS + a
+#     Cloudflare tunnel rule for a *.prod host, a FuzeInfra change, not this
+#     repo's to assume.
 #
 # KNOWN, SEPARATE BLOCKER (not fixed by this PR, not this repo's to fix): GHCR
 # pulls are failing cluster-wide over IPv6 egress on the Contabo nodes. Even
