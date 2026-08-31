@@ -15,8 +15,41 @@ const path = require('node:path');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'design-frames-server-test-'));
 process.env.DESIGN_FRAMES_DATA_DIR = tmp;
-process.env.DESIGN_FRAMES_API_TOKENS = 'test-token-123';
 process.env.DESIGN_FRAMES_PORT = '0';
+
+// ─── Machine-token auth stub (issue #26) ───
+//
+// Writes are gated on a FuzeFront-issued machine token, verified against
+// FuzeFront's introspection endpoint. These tests script that endpoint rather
+// than reaching the network. `test-token-123` stays the suite's happy-path
+// credential so the CRUD tests below read the same as before — but it is now an
+// ACTIVE, correctly-scoped machine token, not a pre-shared secret.
+process.env.FUZEFRONT_API_URL = 'https://fuzefront.test';
+process.env.DESIGN_FRAMES_INTROSPECTION_CACHE_SECONDS = '0';
+
+const INTROSPECT_URL = 'https://fuzefront.test/api/v1/security/tokens/introspect';
+const WRITE_SCOPE = 'fuzex:frames:write';
+
+/** Scripted introspection responses keyed by token. Unknown => 200 active:false. */
+const introspections = new Map([
+  [
+    'test-token-123',
+    { active: true, subject: 'svc-test', tenantId: 'tenant-test', scope: WRITE_SCOPE },
+  ],
+]);
+/** What the stub last answered, so a test can prove the HTTP status it used. */
+let lastIntrospection = null;
+
+globalThis.fetch = async (url, init) => {
+  assert.strictEqual(url, INTROSPECT_URL);
+  const { token } = JSON.parse(init.body);
+  const body = introspections.get(token) || { active: false };
+  lastIntrospection = { status: 200, token };
+  // NOTE the status: introspection answers 200 for EVERY token, including
+  // inactive ones. That is the contract, and the reason the service must branch
+  // on `active` in the body rather than on the status code.
+  return { ok: true, status: 200, json: async () => body };
+};
 
 const { start } = require('../server');
 
@@ -69,6 +102,64 @@ async function main() {
   await test('unauthenticated create is rejected', async () => {
     const res = await request(port, { method: 'POST', path: '/api/v1/features', headers: { 'Content-Type': 'application/json' } }, { slug: 'x' });
     assert.strictEqual(res.status, 401);
+  });
+
+  // ─── Fail-open regression guards ───
+  //
+  // Introspection answers HTTP 200 for every token, so a service that reads
+  // "200" as "valid" accepts EVERY token — a silent, total auth bypass. These
+  // assert the 200-but-inactive case is refused, and check the stub really did
+  // answer 200 so they cannot pass for the wrong reason.
+
+  await test('FAIL-OPEN GUARD: introspection 200 + active:false is rejected', async () => {
+    introspections.set('revoked-token', { active: false });
+    const res = await request(
+      port,
+      { method: 'POST', path: '/api/v1/features', headers: { Authorization: 'Bearer revoked-token', 'Content-Type': 'application/json' } },
+      { slug: 'should-never-exist' }
+    );
+    assert.deepStrictEqual(lastIntrospection, { status: 200, token: 'revoked-token' });
+    assert.strictEqual(res.status, 401, 'an inactive token must be refused despite the 200');
+    assert.strictEqual(res.data.code, 'TOKEN_INACTIVE');
+  });
+
+  await test('FAIL-OPEN GUARD: a body with no `active` field is rejected', async () => {
+    introspections.set('no-active', { subject: 'svc-x', scope: WRITE_SCOPE });
+    const res = await request(
+      port,
+      { method: 'POST', path: '/api/v1/features', headers: { Authorization: 'Bearer no-active', 'Content-Type': 'application/json' } },
+      { slug: 'should-never-exist' }
+    );
+    assert.strictEqual(lastIntrospection.status, 200);
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.data.code, 'MALFORMED_RESPONSE');
+  });
+
+  await test('an active token WITHOUT the write scope is 403, not 401', async () => {
+    introspections.set('read-only', { active: true, subject: 'svc-r', scope: 'fuzex:frames:read' });
+    const res = await request(
+      port,
+      { method: 'POST', path: '/api/v1/features', headers: { Authorization: 'Bearer read-only', 'Content-Type': 'application/json' } },
+      { slug: 'should-never-exist' }
+    );
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.data.code, 'FORBIDDEN');
+  });
+
+  await test('the retired DESIGN_FRAMES_API_TOKENS value is not a credential', async () => {
+    process.env.DESIGN_FRAMES_API_TOKENS = 'legacy-token';
+    const res = await request(
+      port,
+      { method: 'POST', path: '/api/v1/features', headers: { Authorization: 'Bearer legacy-token', 'Content-Type': 'application/json' } },
+      { slug: 'should-never-exist' }
+    );
+    delete process.env.DESIGN_FRAMES_API_TOKENS;
+    assert.strictEqual(res.status, 401);
+  });
+
+  await test('reads stay public — no token required', async () => {
+    const res = await request(port, { method: 'GET', path: '/api/v1/features' });
+    assert.strictEqual(res.status, 200);
   });
 
   await test('authenticated create succeeds', async () => {
