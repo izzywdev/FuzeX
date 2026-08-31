@@ -12,18 +12,20 @@
  *
  * Deliberately plain node:http, no framework — matches this repo's existing
  * bridge-server.js style. UNLIKE bridge-server.js this service is meant to be
- * network-reachable (not loopback-only): auth is a bearer token from
- * DESIGN_FRAMES_API_TOKENS (comma-separated, supports multiple callers e.g.
- * a CI token for FuzeFront + an interactive token for product-designer).
+ * network-reachable (not loopback-only): writes are authenticated with a
+ * FuzeFront-issued MACHINE token, verified per request against FuzeFront's own
+ * /api/v1/security/tokens/introspect and required to carry the
+ * `fuzex:frames:write` scope (issue #26). This replaced DESIGN_FRAMES_API_TOKENS,
+ * a comma-separated list of pre-shared bearers — see the auth block below for
+ * why that mechanism was worse than the comments here used to claim.
  * Reads of already-created features/frames are intentionally UNAUTHENTICATED
  * (GET /api/v1/features, GET .../frames/:file, GET /site/**) — this mirrors
  * the FuzeFront precedent of publishing frames to GitHub Pages for public
  * review on an oss-public repo. All writes (POST/PUT/DELETE and the approve/
- * reject actions) require a valid bearer token.
+ * reject actions) require a valid machine token.
  */
 
 const http = require('node:http');
-const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const store = require('./lib/store');
