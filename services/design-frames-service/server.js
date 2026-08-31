@@ -51,23 +51,58 @@ const BIND_HOST = process.env.DESIGN_FRAMES_HOST || '0.0.0.0';
 const PORT = parseInt(process.env.DESIGN_FRAMES_PORT, 10) || 4400;
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — frame HTML is bigger than an MCP tool call
 
-const TOKENS = new Set(
-  (process.env.DESIGN_FRAMES_API_TOKENS || '')
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean)
-);
+// ─── Write auth: FuzeFront machine tokens (issue #26) ───
+//
+// This REPLACES the DESIGN_FRAMES_API_TOKENS pre-shared bearer list. That
+// mechanism had a defect worth naming, because the surrounding comments claimed
+// the opposite of what the code did: `isAuthorized` began
+//
+//     if (TOKENS.size === 0) return true;   // "local dev with no token configured"
+//
+// so an UNSET secret made every write UNAUTHENTICATED — while this file's header
+// and deploy/helm/fuzex/templates/deployment.yaml both asserted that absent the
+// secret "EVERY write 401s — a safe default". It was mounted `optional: true`
+// precisely so the pod could start without it. Any environment missing the
+// secret was therefore serving an open write API, and the documentation said it
+// was closed. There is no such mode below: no token is a denial, always.
+//
+// Callers now present a FuzeFront-issued machine token, verified per request
+// against FuzeFront's own /api/v1/security/tokens/introspect.
+const {
+  createMachineTokenVerifier,
+  ServiceAuthError,
+} = require('@izzywdev/fuzefront-service-auth');
 
-function safeCompare(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const ab = Buffer.from(a, 'utf8');
-  const bb = Buffer.from(b, 'utf8');
-  if (ab.length !== bb.length) {
-    crypto.timingSafeEqual(Buffer.alloc(32), Buffer.alloc(32));
-    return false;
+/**
+ * FuzeFront's ORIGIN, e.g. https://app.fuzefront.com — NOT including `/api`.
+ * The verifier appends the contract path itself, so a value ending in `/api`
+ * yields `/api/api/v1/...` and 404s. A 404 is treated as a denial, so a
+ * misconfiguration here fails CLOSED (every write 401s), never open.
+ */
+const FUZEFRONT_API_URL = process.env.FUZEFRONT_API_URL;
+
+/** Scope a machine token must carry to write. */
+const REQUIRED_SCOPE = process.env.DESIGN_FRAMES_REQUIRED_SCOPE || 'fuzex:frames:write';
+
+if (!FUZEFRONT_API_URL) {
+  if (process.env.NODE_ENV === 'production') {
+    // Fail at startup rather than serve writes we cannot authenticate. The old
+    // code's equivalent situation (no secret) silently served them.
+    throw new Error('FUZEFRONT_API_URL must be set in production');
   }
-  return crypto.timingSafeEqual(ab, bb);
+  console.warn(
+    '[auth] WARNING: FUZEFRONT_API_URL is not set — every write will be rejected (401)'
+  );
 }
+
+const verifier = createMachineTokenVerifier({
+  baseUrl: FUZEFRONT_API_URL || 'http://fuzefront-api.invalid',
+  // Resolved at CALL time so tests can install a stub after this module loads.
+  fetch: (input, init) => globalThis.fetch(input, init),
+  // POSITIVE results only; the package never caches a negative verdict, so a
+  // revoked token is denied on the very next request.
+  cacheTtlSeconds: Number(process.env.DESIGN_FRAMES_INTROSPECTION_CACHE_SECONDS ?? 5),
+});
 
 function extractBearer(req) {
   const header = req.headers['authorization'] || '';
@@ -75,12 +110,52 @@ function extractBearer(req) {
   return header.slice('Bearer '.length).trim();
 }
 
-function isAuthorized(req) {
-  if (TOKENS.size === 0) return true; // local dev with no token configured
-  const provided = extractBearer(req);
-  if (!provided) return false;
-  for (const t of TOKENS) if (safeCompare(provided, t)) return true;
-  return false;
+/**
+ * Decide a write request. Resolves to `{ ok: true, identity }` or a denial
+ * `{ ok: false, status, code, error }` — never throws, and never returns ok
+ * for a token it could not positively verify.
+ *
+ * FAIL-CLOSED. Introspection answers HTTP 200 for EVERY token, including
+ * unknown/expired/revoked ones (`200 { active: false }`). Branching on the
+ * status code would accept every token ever presented. `verifyMachineToken`
+ * branches on the body's `active` boolean and THROWS on every ambiguity
+ * (network error, timeout, non-200, unparsable body, missing/non-boolean
+ * `active`, missing `subject`); the catch below turns each of those into a
+ * denial, never a pass.
+ */
+async function authorizeWrite(req) {
+  const token = extractBearer(req);
+  if (!token) {
+    return {
+      ok: false,
+      status: 401,
+      code: 'NO_TOKEN',
+      error: 'Unauthorized — a FuzeFront machine token is required for write operations',
+    };
+  }
+
+  let identity;
+  try {
+    identity = await verifier.verifyMachineToken(token);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 401,
+      code: err instanceof ServiceAuthError ? err.code : 'UNKNOWN',
+      error: 'Unauthorized — token could not be verified',
+    };
+  }
+
+  if (!identity.scopes.includes(REQUIRED_SCOPE)) {
+    return {
+      ok: false,
+      status: 403,
+      code: 'FORBIDDEN',
+      error: `Forbidden — token lacks the ${REQUIRED_SCOPE} scope`,
+    };
+  }
+
+  return { ok: true, identity };
 }
 
 function readBody(req) {
@@ -243,8 +318,13 @@ async function handleRequest(req, res) {
     }
 
     const isWrite = ['POST', 'PUT', 'DELETE'].includes(req.method);
-    if (isWrite && !isAuthorized(req)) {
-      return sendJson(res, 401, { error: 'Unauthorized — Bearer token required for write operations' });
+    if (isWrite) {
+      const decision = await authorizeWrite(req);
+      if (!decision.ok) {
+        return sendJson(res, decision.status, { error: decision.error, code: decision.code });
+      }
+      // Verified caller identity, available to handlers for attribution.
+      req.machineIdentity = decision.identity;
     }
 
     // GET /api/v1/features
@@ -377,8 +457,10 @@ function start() {
   server.listen(PORT, BIND_HOST, () => {
     console.log(`design-frames-service listening on http://${BIND_HOST}:${PORT}`);
     console.log(`data dir: ${store.DATA_DIR}`);
-    if (TOKENS.size === 0) {
-      console.warn('WARNING: DESIGN_FRAMES_API_TOKENS is unset — writes are UNAUTHENTICATED. Set it before deploying.');
+    if (!FUZEFRONT_API_URL) {
+      console.warn(
+        'WARNING: FUZEFRONT_API_URL is unset — writes cannot be verified and will all be REJECTED.'
+      );
     }
   });
   return server;
@@ -388,4 +470,4 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { start, handleRequest, isAuthorized, safeCompare };
+module.exports = { start, handleRequest, authorizeWrite, extractBearer, REQUIRED_SCOPE };
