@@ -571,7 +571,22 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Required for all write operations (POST/PUT/DELETE except /health). Reads are public.
+      description: >
+        A FuzeFront-issued MACHINE token (OAuth2 client-credentials), required
+        for all write operations (POST/PUT/DELETE). Reads are public.
+
+        Obtain one from FuzeFront's `POST /api/v1/security/tokens`. This service
+        verifies it per request against FuzeFront's
+        `POST /api/v1/security/tokens/introspect` and requires the scope
+        `fuzex:frames:write`; a token without it gets 403, not 401.
+
+        Verification is fail-closed: introspection answers HTTP 200 even for an
+        inactive token, so the decision is made on the `active` boolean in the
+        response body. An unreachable or unusable introspection endpoint denies
+        the request rather than allowing it.
+
+        This replaced the `DESIGN_FRAMES_API_TOKENS` pre-shared bearer list
+        (issue #26), which is deleted — there is no fallback.
   parameters:
     Slug:
       name: slug

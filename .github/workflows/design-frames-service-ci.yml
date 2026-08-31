@@ -135,7 +135,11 @@ jobs:
             services/design-frames-service
       - name: Smoke-check the built image serves /health (MF remote moved to webapp-mfe)
         run: |
-          docker run -d --name dfs-smoke -p 4400:4400 -e DESIGN_FRAMES_API_TOKENS=ci-smoke design-frames-service:ci
+          # FUZEFRONT_API_URL points at an unroutable host on purpose: this smoke
+          # check only asserts /health (unauthenticated) is served. Writes will
+          # 401 because introspection is unreachable — which is the correct,
+          # fail-closed behaviour, not a misconfiguration to paper over.
+          docker run -d --name dfs-smoke -p 4400:4400             -e FUZEFRONT_API_URL=http://fuzefront.invalid design-frames-service:ci
           for i in $(seq 1 20); do
             curl -sf http://127.0.0.1:4400/health && break
             sleep 1

@@ -71,7 +71,8 @@ FuzeFront-side PR). This service reimplements the same mechanisms:
 - **Network-reachable by design.** `bridge-server.js` is a localhost-only dev
   bridge; this service is meant to be deployed and called by other products'
   CI, so it binds `0.0.0.0` and authenticates writes with a bearer token
-  (`DESIGN_FRAMES_API_TOKENS`) instead of relying on a loopback bind.
+  (a FuzeFront machine token, verified per request — issue #26) instead of
+  relying on a loopback bind.
 
 ## What's explicitly deferred (not done in this extraction)
 

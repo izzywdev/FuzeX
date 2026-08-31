@@ -122,12 +122,10 @@ spec:
             # default, not a working one, so the secret is referenced rather than
             # defaulted, and `optional` lets the service come up read-only instead
             # of CrashLooping on a missing token.
-            - name: DESIGN_FRAMES_API_TOKENS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.apiTokens.existingSecret | quote }}
-                  key: {{ .Values.apiTokens.secretKey | quote }}
-                  optional: true
+            - name: FUZEFRONT_API_URL
+              value: {{ .Values.fuzefront.apiUrl | quote }}
+            - name: DESIGN_FRAMES_REQUIRED_SCOPE
+              value: {{ .Values.fuzefront.requiredScope | quote }}
           readinessProbe:
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 3
