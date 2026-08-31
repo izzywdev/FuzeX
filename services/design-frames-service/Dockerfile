@@ -119,13 +119,21 @@ RUN npm run build
 
 FROM node:24-alpine AS backend-builder
 WORKDIR /build/services/design-frames-service/backend
-COPY backend/package.json backend/package-lock.json ./
+COPY backend/package.json backend/package-lock.json backend/.npmrc ./
 COPY --from=identity-builder /build/packages/identity /build/packages/identity
 # --install-links: copies the local @fuzex/identity package.json's declared
 # `files` (dist/, package.json, README.md) into node_modules instead of
 # symlinking to /build/packages/identity — a symlink would dangle once this
 # stage's absolute paths are left behind by the final COPY --from below.
-RUN npm install --no-audit --no-fund --install-links
+#
+# .npmrc + the BuildKit token secret are newly required: this tier now depends
+# on @izzywdev/fuzefront-service-auth (issue #26), which lives on GitHub
+# Packages rather than registry.npmjs.org. Without them npm resolves it
+# unauthenticated and fails E401. A secret mount, not an ARG — an ARG is baked
+# into image history and `docker history` would print the token.
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" && \
+    npm install --no-audit --no-fund --install-links
 COPY backend/ ./
 # NOT `npm prune --omit=dev` — verified (locally, outside Docker, since this
 # sandbox has no daemon) that `npm prune` re-resolves the LOCAL `file:`
@@ -138,7 +146,9 @@ COPY backend/ ./
 # MODULE_NOT_FOUND at boot, before the app ever binds its port. A fresh
 # `--omit=dev --install-links` install (rather than pruning the existing
 # one) keeps the real copy.
-RUN npm run build \
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" && \
+    npm run build \
     && rm -rf node_modules \
     && npm install --no-audit --no-fund --omit=dev --install-links
 
