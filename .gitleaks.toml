@@ -1,0 +1,69 @@
+# `[extend] useDefault = true` IS LOAD-BEARING. DO NOT REMOVE IT TO SILENCE A FINDING.
+#
+# In gitleaks v8, a config file that declares no [[rules]] of its own and does not
+# extend the default set loads ZERO rules. gitleaks then reports "no leaks found" on
+# a tree containing live credentials — the gate is green because it is looking for
+# nothing, not because the tree is clean. There is no warning and no error.
+#
+# This is not hypothetical. Measured 2026-08-21 across the family: 9 of the 12 repos
+# carrying a .gitleaks.toml were in exactly this state, and their gate-secret-scan
+# had never been able to find anything. Verified both directions with gitleaks
+# 8.24.3 on a repo holding a planted AWS access key:
+#
+#     config as committed (no [extend])  ->  "no leaks found"
+#     same config + these two lines      ->  "leaks found: 1"
+#
+# Every one of those 9 configs was written in good faith to NARROW the default rules
+# — for SealedSecret ciphertext, or for a known false positive — and silently
+# disabled all of them instead. That is the whole failure mode, and it is why this
+# file exists: the allowlist looks like the fix and is the cause.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Canonical starting point — narrow this deliberately, never by deleting [extend]"
+
+# AUTH_MODE enum tokens from @fuzefront/auth. These are the literal values of the
+# AUTH_MODE setting, not credentials; generic-api-key flags them on shape and
+# entropy alone (`legacy-hs256` scores 3.58 bits and has a hex-ish suffix).
+#
+# Anchored with ^...$ so they match the whole secret and nothing else. An unanchored
+# '''legacy-hs256''' would be a substring match — one repo shipped exactly that, and
+# because the file also lacked [extend], suppressing that one string suppressed every
+# rule in the product.
+regexes = [
+  '''^legacy-hs256$''',
+  '''^oidc-jwks$''',
+  '''^federated-jwks$''',
+]
+
+# SealedSecret ciphertext is kubeseal output: encrypted, and safe to commit. The
+# high-entropy base64 blobs trip generic-api-key on shape alone.
+#
+# SEEDED, so add your repo's own sealed paths here — they vary across the family
+# (deploy/sealed-secrets/, deploy/argocd/sealed/, deploy/contabo/sealed/ are all in
+# use). List what your repo ACTUALLY has; do not paste all three speculatively.
+paths = [
+  '''^deploy/sealed-secrets/''',
+  '''^deploy/argocd/sealed/''',
+]
+
+# ---------------------------------------------------------------------------
+# How to add an entry here, and the one rule that matters
+#
+# Before adding an allowlist entry, confirm the finding is genuinely not a secret —
+# read it, do not assume from the filename. Then scope the entry as tightly as the
+# finding allows: an exact anchored string beats a path, and one file beats a glob.
+# Blanket-allowlisting a directory like `tests/` will suppress a real key pasted
+# there later.
+#
+# THEN PROVE THE NARROWED CONFIG STILL FAILS. Plant a real-shaped credential (an
+# AKIA... key works) at the same position the false positive occupies, and confirm
+# gitleaks still reports it:
+#
+#     gitleaks git --redact --no-banner .
+#
+# An allowlist that cannot be shown to still fail is indistinguishable from deleting
+# the gate. A clean scan only means something if you have evidence the scanner would
+# have spoken up.
+# ---------------------------------------------------------------------------

@@ -1,0 +1,40 @@
+{
+  "$comment": "Ratchet policy for gate-a2a (scripts/gate_a2a.py). See governance/a2a-runtime-standard.md §4. IF THIS FILE IS ABSENT THE GATE RUNS IN `fail` MODE — absence is not permission. Only the named worklist below is softened, and only for the rules that name it; a repo not on a worklist gets `fail` even while the mode reads `warn`.",
+  "version": 1,
+  "skills": {
+    "adoption": "warn",
+    "$comment": "Rule 4.1 (a NAMED skill that does not resolve to .claude/skills/<name>/SKILL.md) ALWAYS fails and is not governed by this key — a new violation can never be ratcheted past. This key governs rule 4.2 (a2a.enabled repo whose serving roles declare ZERO bundle skills) and 4.3 (missing root CLAUDE.md). Measured 2026-08-23: 19 of 20 repos declare zero role skills, so `fail` here would red every A2A-enabled repo at once for pre-existing state. Flip to `fail` once ratchet.knownUnadopted is empty.",
+    "ratchet": {
+      "owner": "@izzywdev",
+      "$comment": "Repos with a2a.enabled=true and zero bundle skills declared on their serving roles, measured on their LIVE default branch 2026-08-23. Claiming one means giving its serving role a real skills[] list pointing at real .claude/skills/<name>/SKILL.md bundles. Removing the last entry is the trigger to set adoption=fail.",
+      "knownUnadopted": [
+        "izzywdev/FuzeFront",
+        "izzywdev/fuzeagent",
+        "izzywdev/fuzebi",
+        "izzywdev/fuzehub",
+        "izzywdev/fuzeplan",
+        "izzywdev/fuzesales",
+        "izzywdev/fuzeservice",
+        "izzywdev/fuzex"
+      ]
+    }
+  },
+  "image": {
+    "repository": "ghcr.io/izzywdev/fuzeagent-a2a",
+    "$comment": "The ONE shared A2A runtime image (fuzeagent/agent-templates/a2a/Dockerfile, built by fuzeagent release.yml). Any other A2A image repository is a fork of the shared runtime, not a variation, and fails. `latest` is allowed in values.yaml (dev shape) and forbidden in values-prod.yaml."
+  },
+  "creds": {
+    "sealedSecretDirs": ["deploy/sealed-secrets", "helm/sealed-secrets", "deploy/helm/sealed-secrets"],
+    "externallyProvisioned": {
+      "$comment": "secretRef {name} values provisioned OUTSIDE this repo's git tree. Each entry MUST name who provisions it — an unexplained entry is treated as missing. The gate NEVER reads a secret VALUE from anywhere; these names exist only so a legitimately-external secret is not reported as unwired."
+    }
+  },
+  "memory": {
+    "mode": "client-only",
+    "$comment": "The A2A pod is a Chroma CLIENT of the family's existing Chroma service, using a per-tenant collection. It never runs a Chroma server: chromadb carries PYSEC-2026-311 (unfixable pre-auth code injection in the SERVER's collections handler via trust_remote_code), and FuzeAgent is unaffected only because it never serves that endpoint. See governance/a2a-runtime-standard.md §7."
+  },
+  "apiSurface": {
+    "mode": "mcp-only",
+    "$comment": "The A2A pod reaches a product's API through that product's MCP gateway pointed at the product's FULL OpenAPI document. A raw-REST fallback is REFUSED, not deferred: mcp-gateway/src/spec.ts already emits one tool per OpenAPI operation with no filtering, so a raw path adds zero reachable operations while bypassing classify.ts (mutating/irreversible), safety.ts (prototype-pollution guards on the spec AND on model-generated args) and upstream.ts (caller-token forwarding, which has deliberately no service-token option and fails closed). See §8."
+  }
+}

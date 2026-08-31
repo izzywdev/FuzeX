@@ -5,8 +5,8 @@
       "capability": "core-agents",
       "mode": "managed",
       "sourcePath": "agents/a2a-maintainer.md",
-      "sourceSha256": "07663ea2678e6bf142fe2669399c1a80bb50ebbe555a78e4744177ac0e23bd4c",
-      "renderedSha256": "07663ea2678e6bf142fe2669399c1a80bb50ebbe555a78e4744177ac0e23bd4c"
+      "sourceSha256": "f1693d419475576668182789e2618f5e9338a4ec0513fd90266ff03de62e07a9",
+      "renderedSha256": "f1693d419475576668182789e2618f5e9338a4ec0513fd90266ff03de62e07a9"
     },
     ".claude/agents/agile-manager.md": {
       "capability": "core-agents",
@@ -26,8 +26,8 @@
       "capability": "core-agents",
       "mode": "managed",
       "sourcePath": "agents/contract-designer.md",
-      "sourceSha256": "5623bf51e3eb1b5a45d3b0af4d0b32b618a7ac3a4bb1332ec09e7bcdc4e44b86",
-      "renderedSha256": "5623bf51e3eb1b5a45d3b0af4d0b32b618a7ac3a4bb1332ec09e7bcdc4e44b86"
+      "sourceSha256": "5d355b39da19e408083cb4de484aafde56a6be1a9fabd526969418724ffab3b9",
+      "renderedSha256": "5d355b39da19e408083cb4de484aafde56a6be1a9fabd526969418724ffab3b9"
     },
     ".claude/agents/database-engineer.md": {
       "capability": "core-agents",
@@ -180,8 +180,8 @@
       "capability": "skills",
       "mode": "managed",
       "sourcePath": "skills/repo-hardening/SKILL.md",
-      "sourceSha256": "b33d38d40d677f2f62385971efb9ba7401a47aa22cf9d642ef70854b56cf688b",
-      "renderedSha256": "b33d38d40d677f2f62385971efb9ba7401a47aa22cf9d642ef70854b56cf688b"
+      "sourceSha256": "ed3230a7e5230c31f2002759889e60cc4dae2cb64287d0389bee79bf0c081987",
+      "renderedSha256": "ed3230a7e5230c31f2002759889e60cc4dae2cb64287d0389bee79bf0c081987"
     },
     ".claude/skills/ticket-creator/SKILL.md": {
       "capability": "skills",
@@ -386,12 +386,75 @@
       "sourceSha256": "0609a29df35b0adb8fbda5c15a695a693bc09fb6d01b40bc19b933d23fc249d5",
       "renderedSha256": "0609a29df35b0adb8fbda5c15a695a693bc09fb6d01b40bc19b933d23fc249d5"
     },
+    ".fuze/required-checks.json": {
+      "capability": "required-checks",
+      "mode": "managed",
+      "sourcePath": "governance/required-checks.json",
+      "sourceSha256": "66d43622e025b631e5c8eabad816e927db1da97503ec4cf8447c9b2885c097c6",
+      "renderedSha256": "66d43622e025b631e5c8eabad816e927db1da97503ec4cf8447c9b2885c097c6"
+    },
     ".github/actionlint.yaml": {
       "capability": "community",
       "mode": "seeded",
       "sourcePath": "community-templates/actionlint.yaml",
       "sourceSha256": "e7d79fcb347702b9fbbe2448c45e70f47a6bcd04dde3e4d142b2bfcb59983dfc",
       "renderedSha256": "e7d79fcb347702b9fbbe2448c45e70f47a6bcd04dde3e4d142b2bfcb59983dfc"
+    },
+    ".github/actions/fuze-code-action/__tests__/test_classify.sh": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/__tests__/test_classify.sh",
+      "sourceSha256": "868bf5b250db615386d24068905ea35bd8bf426494517473d56dc5cbb74f55ac",
+      "renderedSha256": "868bf5b250db615386d24068905ea35bd8bf426494517473d56dc5cbb74f55ac"
+    },
+    ".github/actions/fuze-code-action/__tests__/test_extra_env.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/__tests__/test_extra_env.py",
+      "sourceSha256": "221e33fd19bff90a77b2a5311d92c526332fd78ba1690502e79c0e9c02a94179",
+      "renderedSha256": "221e33fd19bff90a77b2a5311d92c526332fd78ba1690502e79c0e9c02a94179"
+    },
+    ".github/actions/fuze-code-action/__tests__/test_passthrough_defaults.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/__tests__/test_passthrough_defaults.py",
+      "sourceSha256": "580b152d228f7b7120d843129397400b83408ec1afe9069bccf4bc2488b696c0",
+      "renderedSha256": "580b152d228f7b7120d843129397400b83408ec1afe9069bccf4bc2488b696c0"
+    },
+    ".github/actions/fuze-code-action/__tests__/test_run_blocks_parse.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/__tests__/test_run_blocks_parse.py",
+      "sourceSha256": "68c504dc7077f393b86ca12f70e9e303a97eee1b6cb113234e2db8cb3f640e67",
+      "renderedSha256": "68c504dc7077f393b86ca12f70e9e303a97eee1b6cb113234e2db8cb3f640e67"
+    },
+    ".github/actions/fuze-code-action/__tests__/test_rung_gating.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/__tests__/test_rung_gating.py",
+      "sourceSha256": "9e26b65902c0309b7231715c96543dd62393ddca42d6ce784206f3a7b296879a",
+      "renderedSha256": "9e26b65902c0309b7231715c96543dd62393ddca42d6ce784206f3a7b296879a"
+    },
+    ".github/actions/fuze-code-action/action.yml": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/action.yml",
+      "sourceSha256": "6e747ebb9d9646c44792ea4b61f28c0d6364d0657ac453cfb95edcd9c686c22e",
+      "renderedSha256": "6e747ebb9d9646c44792ea4b61f28c0d6364d0657ac453cfb95edcd9c686c22e"
+    },
+    ".github/actions/fuze-code-action/classify.sh": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/fuze-code-action/classify.sh",
+      "sourceSha256": "52b595726ddaf25f53f85be57f748ff4d05f340f5578ec0c1bd909d794c33432",
+      "renderedSha256": "52b595726ddaf25f53f85be57f748ff4d05f340f5578ec0c1bd909d794c33432"
+    },
+    ".github/actions/llm-endpoint/action.yml": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": ".github/actions/llm-endpoint/action.yml",
+      "sourceSha256": "939fe5e84568530a6fc2a8328deefa52a31137d639b2fbe6f5c1bd4ca8dae3c9",
+      "renderedSha256": "939fe5e84568530a6fc2a8328deefa52a31137d639b2fbe6f5c1bd4ca8dae3c9"
     },
     ".github/labels.json": {
       "capability": "community",
@@ -477,6 +540,18 @@
         "baselineRef": "v1"
       }
     },
+    ".github/workflows/fuze-code-review.yml": {
+      "capability": "workflows",
+      "mode": "stamped",
+      "sourcePath": "workflow-templates/fuze-code-review.yml",
+      "sourceSha256": "6fb89a68ff4af2ac9816339fea8d037167fe9737515370ef961f1b89a1250e41",
+      "renderedSha256": "6fb89a68ff4af2ac9816339fea8d037167fe9737515370ef961f1b89a1250e41",
+      "renderVars": {
+        "defaultBranch": "master",
+        "baselineRef": "v1",
+        "repoName": "izzywdev/FuzeX"
+      }
+    },
     ".github/workflows/gate-frames-stamped.yml": {
       "capability": "workflows",
       "mode": "stamped",
@@ -497,6 +572,18 @@
       "renderVars": {
         "defaultBranch": "master",
         "baselineRef": "v1"
+      }
+    },
+    ".github/workflows/gate-required-checks.yml": {
+      "capability": "workflows",
+      "mode": "stamped",
+      "sourcePath": "workflow-templates/gate-required-checks.yml",
+      "sourceSha256": "bd5d0b39c4baefb53b10c5307fa16e4b1674fe8ad74604773d2f39e1cac04d5b",
+      "renderedSha256": "bd5d0b39c4baefb53b10c5307fa16e4b1674fe8ad74604773d2f39e1cac04d5b",
+      "renderVars": {
+        "defaultBranch": "master",
+        "baselineRef": "v1",
+        "repoName": "izzywdev/FuzeX"
       }
     },
     ".github/workflows/governance-nightly.yml": {
@@ -600,6 +687,13 @@
       "sourcePath": "workflow-templates/telegram-pr-merged.yml",
       "sourceSha256": "d7b161e66268ee150ccda2726176449262f608b4ee29e397051709aa4c2a3ecc",
       "renderedSha256": "d7b161e66268ee150ccda2726176449262f608b4ee29e397051709aa4c2a3ecc"
+    },
+    ".gitleaks.toml": {
+      "capability": "community",
+      "mode": "seeded",
+      "sourcePath": "community-templates/gitleaks.toml",
+      "sourceSha256": "a73e19d2ef0d062cf5f27179da0a4d35ba3e95b4755a9f966fd40dd794cefe85",
+      "renderedSha256": "a73e19d2ef0d062cf5f27179da0a4d35ba3e95b4755a9f966fd40dd794cefe85"
     },
     ".npmrc": {
       "capability": "npm-registry",
@@ -804,6 +898,20 @@
       "sourceSha256": "74c9fac452b18d218f5fa8a55e189b20d653c065d376c70f12ae1b5fd800b51f",
       "renderedSha256": "74c9fac452b18d218f5fa8a55e189b20d653c065d376c70f12ae1b5fd800b51f"
     },
+    "governance/a2a-policy.json": {
+      "capability": "a2a",
+      "mode": "seeded",
+      "sourcePath": "governance/a2a-policy.json",
+      "sourceSha256": "3a7e40c4acc6fe9d4169ad70247c94e71ed4eb19de3b617385813d94045b13ae",
+      "renderedSha256": "3a7e40c4acc6fe9d4169ad70247c94e71ed4eb19de3b617385813d94045b13ae"
+    },
+    "governance/federation-contract-policy.json": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "governance/federation-contract-policy.json",
+      "sourceSha256": "a22e09f472571a5ba94ae81b247dbfe945a0781f1509b0c494feb1d39ff22e67",
+      "renderedSha256": "a22e09f472571a5ba94ae81b247dbfe945a0781f1509b0c494feb1d39ff22e67"
+    },
     "package.json": {
       "capability": "node-toolchain",
       "mode": "derived",
@@ -825,12 +933,75 @@
       "sourceSha256": "582e9e802e923ea8ce7979f61169327d79e0d461ee5babdfefc1d86c78d9a172",
       "renderedSha256": "582e9e802e923ea8ce7979f61169327d79e0d461ee5babdfefc1d86c78d9a172"
     },
+    "scripts/__tests__/test_fuze_code_review_verdict.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_fuze_code_review_verdict.py",
+      "sourceSha256": "0979cef6714233e10059964f49d9aa7a7b70e0c8332100a77d716da9323dba53",
+      "renderedSha256": "0979cef6714233e10059964f49d9aa7a7b70e0c8332100a77d716da9323dba53"
+    },
+    "scripts/__tests__/test_gate_a2a.py": {
+      "capability": "a2a",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_a2a.py",
+      "sourceSha256": "86e1813cf01ade03f613e970eb2c8c8f0e5a8e3be134e613779b38d6fa47bc5c",
+      "renderedSha256": "86e1813cf01ade03f613e970eb2c8c8f0e5a8e3be134e613779b38d6fa47bc5c"
+    },
+    "scripts/__tests__/test_gate_api_version.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_api_version.py",
+      "sourceSha256": "1fafd2bc7aa2ec7411a6486b5ea9750219dcc30d5d6074972cdc8c95c1bde67a",
+      "renderedSha256": "1fafd2bc7aa2ec7411a6486b5ea9750219dcc30d5d6074972cdc8c95c1bde67a"
+    },
+    "scripts/__tests__/test_gate_federation_contract.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_federation_contract.py",
+      "sourceSha256": "93dd164cdfe1d9c7ed3b3ba8bc0da3e2f49b9b1628669a69d177b957693b5ba5",
+      "renderedSha256": "93dd164cdfe1d9c7ed3b3ba8bc0da3e2f49b9b1628669a69d177b957693b5ba5"
+    },
     "scripts/__tests__/test_gate_identifier.py": {
       "capability": "entity-identity",
       "mode": "managed",
       "sourcePath": "scripts/__tests__/test_gate_identifier.py",
-      "sourceSha256": "d6b01fc736d59e4d1f1f8591f16f03cd4d1faa3a4b7bb422a155c13eb0040723",
-      "renderedSha256": "d6b01fc736d59e4d1f1f8591f16f03cd4d1faa3a4b7bb422a155c13eb0040723"
+      "sourceSha256": "17d58a407e607fd34ac674927c69e44484ca02d55c404ca8caafe2ca5dd5f64b",
+      "renderedSha256": "17d58a407e607fd34ac674927c69e44484ca02d55c404ca8caafe2ca5dd5f64b"
+    },
+    "scripts/__tests__/test_gate_openapi_conformance.py": {
+      "capability": "openapi",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_openapi_conformance.py",
+      "sourceSha256": "e77128e69431a108f64482ab48802b2abe1d39ed58669b4eda091c692e30be8d",
+      "renderedSha256": "e77128e69431a108f64482ab48802b2abe1d39ed58669b4eda091c692e30be8d"
+    },
+    "scripts/__tests__/test_gate_platform_auth.py": {
+      "capability": "platform-auth",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_platform_auth.py",
+      "sourceSha256": "95ba33baeac3159a9101e7425843e4cc98875138ffa1481e9b63ec67bda34b5e",
+      "renderedSha256": "95ba33baeac3159a9101e7425843e4cc98875138ffa1481e9b63ec67bda34b5e"
+    },
+    "scripts/__tests__/test_gate_required_checks.py": {
+      "capability": "required-checks",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_required_checks.py",
+      "sourceSha256": "6ac8dbae4c87e65611bc2859bb6fa5d5a4bd965e0c23b1f085c1e97222cb1f8a",
+      "renderedSha256": "6ac8dbae4c87e65611bc2859bb6fa5d5a4bd965e0c23b1f085c1e97222cb1f8a"
+    },
+    "scripts/__tests__/test_gate_toolchain.py": {
+      "capability": "node-toolchain",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_toolchain.py",
+      "sourceSha256": "930e67afef19e638b2dffac20979eace0312b1ed365702f323cf3b96d612b458",
+      "renderedSha256": "930e67afef19e638b2dffac20979eace0312b1ed365702f323cf3b96d612b458"
+    },
+    "scripts/__tests__/test_gate_vacuous_check.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/__tests__/test_gate_vacuous_check.py",
+      "sourceSha256": "febd1091605fc00fc31f466dcf9529317826d0d648fc5d3250e2cebdda698187",
+      "renderedSha256": "febd1091605fc00fc31f466dcf9529317826d0d648fc5d3250e2cebdda698187"
     },
     "scripts/build-frames-site.mjs": {
       "capability": "workflows",
@@ -843,8 +1014,36 @@
       "capability": "portal-registration",
       "mode": "managed",
       "sourcePath": "scripts/check-registration.mjs",
-      "sourceSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b",
-      "renderedSha256": "82debe9d9c9ddfb24854a4a30a5d4602f13efa147209f5daa9698d187a922e0b"
+      "sourceSha256": "ff37f5ef7ac1a06ac424801bcb7d392382fdad8c718e1ef999fac4b5c8d274b1",
+      "renderedSha256": "ff37f5ef7ac1a06ac424801bcb7d392382fdad8c718e1ef999fac4b5c8d274b1"
+    },
+    "scripts/fuze_code_review_verdict.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/fuze_code_review_verdict.py",
+      "sourceSha256": "b87cc3521e9db45e5142e7e7fe75d9f86b6c241a84f4fa81bb5afb5d7117b273",
+      "renderedSha256": "b87cc3521e9db45e5142e7e7fe75d9f86b6c241a84f4fa81bb5afb5d7117b273"
+    },
+    "scripts/gate-toolchain.mjs": {
+      "capability": "node-toolchain",
+      "mode": "managed",
+      "sourcePath": "scripts/gate-toolchain.mjs",
+      "sourceSha256": "d439ba461abfd1c6e14c5324d40dfb07970d4bee49f38a11e03003eabca5130c",
+      "renderedSha256": "d439ba461abfd1c6e14c5324d40dfb07970d4bee49f38a11e03003eabca5130c"
+    },
+    "scripts/gate_a2a.py": {
+      "capability": "a2a",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_a2a.py",
+      "sourceSha256": "c18a1d31d1ac0491ba33a37df3c9b3ed412313e93084ff64ed6c5270af3e3816",
+      "renderedSha256": "c18a1d31d1ac0491ba33a37df3c9b3ed412313e93084ff64ed6c5270af3e3816"
+    },
+    "scripts/gate_api_version.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_api_version.py",
+      "sourceSha256": "dbdcc301f2a9607ac4b23b71919ff990931cea0ef6404ec8646c03b3c428fafe",
+      "renderedSha256": "dbdcc301f2a9607ac4b23b71919ff990931cea0ef6404ec8646c03b3c428fafe"
     },
     "scripts/gate_ds_conformance.py": {
       "capability": "design-system",
@@ -853,12 +1052,19 @@
       "sourceSha256": "fbedf04a6aa91033e0513b00d59184fbe132d76d3d04ad3259efd22b9e0830b3",
       "renderedSha256": "fbedf04a6aa91033e0513b00d59184fbe132d76d3d04ad3259efd22b9e0830b3"
     },
+    "scripts/gate_federation_contract.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_federation_contract.py",
+      "sourceSha256": "306612164d7a33855bb4e1e36f70bbf289b1e00b29c1eebc3c8887f53351e10f",
+      "renderedSha256": "306612164d7a33855bb4e1e36f70bbf289b1e00b29c1eebc3c8887f53351e10f"
+    },
     "scripts/gate_identifier.py": {
       "capability": "entity-identity",
       "mode": "managed",
       "sourcePath": "scripts/gate_identifier.py",
-      "sourceSha256": "ca1f8bfc2701346e949f1aa669fc4ace9a9586927379870e8dd67effe5d58ac8",
-      "renderedSha256": "ca1f8bfc2701346e949f1aa669fc4ace9a9586927379870e8dd67effe5d58ac8"
+      "sourceSha256": "ae5f4b8d2c1a8390e1339adb269232754c95b2ad0801c751c29e6dcd02cd4aaf",
+      "renderedSha256": "ae5f4b8d2c1a8390e1339adb269232754c95b2ad0801c751c29e6dcd02cd4aaf"
     },
     "scripts/gate_manifest.py": {
       "capability": "schema-validate",
@@ -867,12 +1073,40 @@
       "sourceSha256": "527abd1ed32ff9a928b65e082b306b4055e55d1346cf031a3b8b6ec70ccd76b1",
       "renderedSha256": "527abd1ed32ff9a928b65e082b306b4055e55d1346cf031a3b8b6ec70ccd76b1"
     },
+    "scripts/gate_openapi_conformance.py": {
+      "capability": "openapi",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_openapi_conformance.py",
+      "sourceSha256": "9c417c928d98942eebd51c79c3f1e61d67e80f17f57ff775da37b932743a1950",
+      "renderedSha256": "9c417c928d98942eebd51c79c3f1e61d67e80f17f57ff775da37b932743a1950"
+    },
     "scripts/gate_pagination.py": {
       "capability": "workflows",
       "mode": "managed",
       "sourcePath": "scripts/gate_pagination.py",
       "sourceSha256": "7f1e0d79e2a80a79250db72ff8e437c9cb4a7b596728c4c9b377d66c080f6c35",
       "renderedSha256": "7f1e0d79e2a80a79250db72ff8e437c9cb4a7b596728c4c9b377d66c080f6c35"
+    },
+    "scripts/gate_platform_auth.py": {
+      "capability": "platform-auth",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_platform_auth.py",
+      "sourceSha256": "05f9426b07400f37abcf3e42c250b72d463e5014fdc81134444c93a7b734f601",
+      "renderedSha256": "05f9426b07400f37abcf3e42c250b72d463e5014fdc81134444c93a7b734f601"
+    },
+    "scripts/gate_required_checks.py": {
+      "capability": "required-checks",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_required_checks.py",
+      "sourceSha256": "820f22672f4d9e6c1c5feb2ffbe1cde8ca26ee19963ee90e8111aeac711b9f25",
+      "renderedSha256": "820f22672f4d9e6c1c5feb2ffbe1cde8ca26ee19963ee90e8111aeac711b9f25"
+    },
+    "scripts/gate_vacuous_check.py": {
+      "capability": "workflows",
+      "mode": "managed",
+      "sourcePath": "scripts/gate_vacuous_check.py",
+      "sourceSha256": "3415c860699eda3f3a81c2d935251558f25f8a147024842e4dc8927d19bb7fb0",
+      "renderedSha256": "3415c860699eda3f3a81c2d935251558f25f8a147024842e4dc8927d19bb7fb0"
     },
     "scripts/stamp-frames.mjs": {
       "capability": "workflows",

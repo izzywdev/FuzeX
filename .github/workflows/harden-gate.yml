@@ -290,6 +290,17 @@ jobs:
           # never ran — a new vacuous gate, introduced by the commit that removed four of
           # them. Discovery here is deliberately broad: this directory holds the self-tests
           # for every distributed script, and all of them must be known to fire.
+          #
+          # These suites have real dependencies and MUST have them: the newer
+          # gate self-tests (gate_identifier's polymorphic-ref cases,
+          # gate_api_version, gate_required_checks) parse YAML workflows/specs,
+          # so PyYAML must be present BEFORE this broad discovery — not only in
+          # the "contracts" step below. Without it the whole suite went red for a
+          # missing package instead of a real finding (matches FuzeSDLC's own
+          # harden-gate self-test step). Installed, never skipped-when-absent: a
+          # test that silently skips when its dependency is missing reports green
+          # having verified nothing.
+          pip install -q pyyaml pynacl
           python -m unittest discover -s scripts/__tests__ -p 'test_*.py'
 
       - name: Identifier gate — contracts (enforcing)
