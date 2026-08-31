@@ -3,6 +3,14 @@
   "class": "oss-public",
   "tier": "product",
   "expert": "fuzex-expert",
+  "expertMonitors": [
+    "code.js",
+    "bridge-server.js",
+    "manifest.json",
+    "package.json",
+    "cursor-mcp-config.json",
+    "services/design-frames-service/"
+  ],
   "baselineRef": "v1",
   "agents": [
     "fuzex-expert",
