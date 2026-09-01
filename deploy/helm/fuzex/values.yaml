@@ -36,13 +36,35 @@ persistence:
   mountPath: /data/features
 
 # -- write authentication. Reads (including the public /site review surface) are
-# unauthenticated by the service's own design; writes need a Bearer token from
-# this Secret. `optional: true` in the pod spec, so a missing secret brings the
-# service up READ-ONLY rather than CrashLooping — every write 401s, which is a
-# safe state and a visible one.
-apiTokens:
-  existingSecret: fuzex-api-tokens
-  secretKey: DESIGN_FRAMES_API_TOKENS
+# unauthenticated by the service's own design; writes require a FuzeFront-issued
+# MACHINE token, verified per request against FuzeFront's own
+# /api/v1/security/tokens/introspect and required to carry `requiredScope`.
+#
+# There is NO pre-shared secret here any more. The previous `apiTokens` block
+# referenced the `fuzex-api-tokens` Secret, mounted `optional: true`, and the
+# comment here claimed a missing secret brought the service up "READ-ONLY —
+# every write 401s, a safe state". That was FALSE: server.js opened with
+# `if (TOKENS.size === 0) return true`, so a MISSING SECRET MADE EVERY WRITE
+# UNAUTHENTICATED. Because the mount was optional, that was the default state of
+# any environment nobody had sealed a token into — including this one. Issue #26
+# replaced the mechanism; `fuzefront.apiUrl` below is a URL, not a credential,
+# and a missing/incorrect value fails CLOSED (every write 401s), which is what
+# the old comment only claimed.
+fuzefront:
+  # FuzeFront's ORIGIN. Must NOT end in /api — the client appends the full
+  # contract path itself, so a trailing /api yields /api/api/v1/... and 404s.
+  apiUrl: http://fuzefront-backend.fuzefront.svc.cluster.local:3001
+# WHY fuzefront-backend:3001 AND NOT fuzefront-security:3002 — read before
+# "fixing" this. FuzeFront is mid-way through a 3-way backend split: a
+# dedicated `fuzefront-security` Service (port 3002) exists in its chart, but
+# `securityService.enabled` is FALSE and the comment there is explicit that
+# "the old backend still serves every route until the Phase 3 cutover flips
+# routing". So today /api/v1/security/tokens/introspect is served by the
+# backend. When that cutover lands, this value moves to
+# http://fuzefront-security.fuzefront.svc.cluster.local:3002 — it is a values
+# override, deliberately not hardcoded in the template.
+  # Scope a machine token must carry to write.
+  requiredScope: fuzex:frames:write
 
 # -- ingress: the public origin registration/manifest.json points integration.url
 # at. Disabled and hostless — the name needs DNS + the Cloudflare tunnel, which

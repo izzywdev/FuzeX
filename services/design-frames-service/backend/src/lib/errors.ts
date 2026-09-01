@@ -41,6 +41,20 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/**
+ * Authenticated, but not permitted — e.g. a verified machine token that does
+ * not carry the required scope. Distinct from UnauthorizedError so a caller can
+ * tell "your token is not valid" (retry with a new one) from "your token is
+ * valid but does not grant this" (retrying will never help).
+ */
+export class ForbiddenError extends Error {
+  code = 'FORBIDDEN' as const;
+  constructor(message = 'Forbidden') {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
 export class StampConflictError extends Error {
   code = 'STAMP_CONFLICT' as const;
   expectedStamp: string;
@@ -78,6 +92,8 @@ export function errorStatus(err: CodedError): number {
       return 400;
     case 'UNAUTHORIZED':
       return 401;
+    case 'FORBIDDEN':
+      return 403;
     case '23505': // pg unique_violation surfaced without our own wrapper
       return 409;
     case '23514': // pg check_violation

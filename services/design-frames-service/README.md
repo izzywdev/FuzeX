@@ -45,14 +45,19 @@ tracking and navigability.
 ```bash
 cd services/design-frames-service
 npm test                 # runs the full suite (stamp/schema/store/server)
-DESIGN_FRAMES_API_TOKENS=dev-token npm run dev    # http://localhost:4400
+FUZEFRONT_API_URL=https://app.fuzefront.com npm run dev    # http://localhost:4400
 ```
 
 Open `http://localhost:4400/` for the frontend (feature list → frame viewer →
-per-flow approve/revoke). Paste the token into the "API token" field to
-unlock write actions; reads (feature list, manifest, frame content, the
-`/site/**` review surface) are intentionally public — see the security note
-in `server.js`.
+per-flow approve/revoke). Writes need a FuzeFront-issued **machine token**
+carrying the `fuzex:frames:write` scope — paste one into the "API token" field
+to unlock write actions. Reads (feature list, manifest, frame content, the
+`/site/**` review surface) are intentionally public — see the security note in
+`server.js`.
+
+Obtain a machine token from FuzeFront's `POST /api/v1/security/tokens`
+(client-credentials); `createServiceAuthClient` in
+`@izzywdev/fuzefront-service-auth` will fetch, cache and refresh one for you.
 
 ## Environment variables
 
@@ -61,7 +66,14 @@ in `server.js`.
 | `DESIGN_FRAMES_HOST` | `0.0.0.0` | bind address — unlike `bridge-server.js` this service is meant to be network-reachable |
 | `DESIGN_FRAMES_PORT` | `4400` | listen port |
 | `DESIGN_FRAMES_DATA_DIR` | `./data/features` | file-backed storage root (one dir per feature, mirrors FuzeFront's `design/frames/<feature>/` layout) |
-| `DESIGN_FRAMES_API_TOKENS` | *(unset)* | comma-separated bearer tokens accepted for write operations. **Unset = writes are unauthenticated — do not deploy without setting this.** |
+| `FUZEFRONT_API_URL` | *(unset)* | FuzeFront's **origin** (NOT ending in `/api`), used to verify machine tokens at `/api/v1/security/tokens/introspect`. **Unset = every write is rejected.** |
+| `DESIGN_FRAMES_REQUIRED_SCOPE` | `fuzex:frames:write` | scope a machine token must carry to write |
+| `DESIGN_FRAMES_INTROSPECTION_CACHE_SECONDS` | `5` | how long a POSITIVE introspection result is reused. Negative results are never cached, so a revocation takes effect on the next request. |
+
+> Replaced `DESIGN_FRAMES_API_TOKENS` (issue #26). That variable was a
+> comma-separated pre-shared bearer list whose **unset** state made every write
+> *unauthenticated*, not rejected — the opposite of what its docs said. Nothing
+> below has an open-by-default mode.
 
 ## REST API
 

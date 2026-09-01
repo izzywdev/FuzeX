@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@fuzex/identity": "file:../../../packages/identity",
+    "@izzywdev/fuzefront-service-auth": "^0.1.1",
     "express": "^5.2.1",
     "pg": "^8.23.0",
     "pino": "^9.5.0"

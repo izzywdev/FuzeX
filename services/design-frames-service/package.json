@@ -10,7 +10,9 @@
     "mcp": "node mcp/server.js",
     "test": "node tests/stamp.test.cjs && node tests/schema.test.cjs && node tests/store.test.cjs && node tests/server.test.cjs && node tests/mcp.test.cjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@izzywdev/fuzefront-service-auth": "^0.1.1"
+  },
   "engines": {
     "node": ">=24.0.0",
     "npm": ">=10.0.0"

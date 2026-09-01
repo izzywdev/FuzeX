@@ -35,6 +35,10 @@ const { execFileSync } = require('node:child_process');
 const { Client } = require('pg');
 
 const ACCEPTANCE_TOKEN = 'acceptance-suite-bearer-token';
+// FuzeFront origin the harness pretends to verify machine tokens against. Never
+// reached over the network — bootServer() installs a fetch stub for exactly
+// this URL (see below) and passes everything else through.
+const ACCEPTANCE_INTROSPECTION_ORIGIN = 'https://fuzefront.acceptance.invalid';
 
 const MIGRATE_SCRIPT = path.join(__dirname, '..', '..', 'db', 'migrate.sh');
 
@@ -141,7 +145,38 @@ async function bootServer() {
   const tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dfx-acceptance-data-'));
   process.env.DATABASE_URL = ephemeralUrl;
   process.env.DESIGN_FRAMES_DATA_DIR = tmpDataDir;
-  process.env.DESIGN_FRAMES_API_TOKENS = ACCEPTANCE_TOKEN;
+  // Writes are gated on a FuzeFront machine token (issue #26), so the harness
+  // scripts FuzeFront's introspection endpoint: ACCEPTANCE_TOKEN introspects as
+  // ACTIVE and correctly-scoped, and every other token as inactive — keeping
+  // BOTH the authenticated and unauthenticated paths exercisable in one run,
+  // which is what this harness's contract with the acceptance suite is.
+  //
+  // Only the introspection URL is intercepted; all other fetches pass through.
+  process.env.FUZEFRONT_API_URL = ACCEPTANCE_INTROSPECTION_ORIGIN;
+  process.env.DESIGN_FRAMES_INTROSPECTION_CACHE_SECONDS = '0';
+  if (!globalThis.__dfxIntrospectionStubInstalled) {
+    const realFetch = globalThis.fetch.bind(globalThis);
+    globalThis.fetch = async (url, init) => {
+      if (url === `${ACCEPTANCE_INTROSPECTION_ORIGIN}/api/v1/security/tokens/introspect`) {
+        const { token } = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () =>
+            token === ACCEPTANCE_TOKEN
+              ? {
+                  active: true,
+                  subject: 'svc-acceptance',
+                  tenantId: 'tenant-acceptance',
+                  scope: 'fuzex:frames:write',
+                }
+              : { active: false },
+        };
+      }
+      return realFetch(url, init);
+    };
+    globalThis.__dfxIntrospectionStubInstalled = true;
+  }
   process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
 
   const backendDistApp = path.join(__dirname, '..', '..', 'backend', 'dist', 'app.js');

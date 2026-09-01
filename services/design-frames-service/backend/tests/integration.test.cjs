@@ -27,7 +27,43 @@ if (!DATABASE_URL) {
 
 const tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dfx-test-data-'));
 process.env.DESIGN_FRAMES_DATA_DIR = tmpDataDir;
-process.env.DESIGN_FRAMES_API_TOKENS = ''; // writes unauthenticated in this suite; auth is covered by auth.test.cjs
+// Writes are gated on a FuzeFront machine token (issue #26). This suite is
+// about lifecycle behaviour, not auth (auth.test.cjs owns that), so it presents
+// one always-valid token and scripts introspection to accept it.
+//
+// It used to set DESIGN_FRAMES_API_TOKENS='' and rely on the old middleware's
+// "no tokens configured => allow every write" branch. That branch is gone: it
+// was the same code path that left any deployment without the secret serving an
+// open write API, so there is deliberately no way to reproduce it here.
+process.env.FUZEFRONT_API_URL = 'https://fuzefront.test';
+process.env.DESIGN_FRAMES_INTROSPECTION_CACHE_SECONDS = '0';
+
+const TEST_TOKEN = 'integration-machine-token';
+const INTROSPECT_URL = 'https://fuzefront.test/api/v1/security/tokens/introspect';
+const AUTH_HEADERS = { Authorization: `Bearer ${TEST_TOKEN}` };
+
+// Intercept ONLY the introspection call; every other fetch (this suite's own
+// HTTP requests against the app under test) goes to the real implementation.
+const realFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = async (url, init) => {
+  if (url === INTROSPECT_URL) {
+    const { token } = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () =>
+        token === TEST_TOKEN
+          ? {
+              active: true,
+              subject: 'svc-integration',
+              tenantId: 'tenant-integration',
+              scope: 'fuzex:frames:write',
+            }
+          : { active: false },
+    };
+  }
+  return realFetch(url, init);
+};
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
 
 // Truncate every lifecycle table so repeated runs start clean.
@@ -58,7 +94,10 @@ test.after(async () => {
 async function j(method, path, body) {
   const res = await fetch(`${base}${path}`, {
     method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers:
+      body !== undefined
+        ? { 'Content-Type': 'application/json', ...AUTH_HEADERS }
+        : { ...AUTH_HEADERS },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -367,6 +406,9 @@ test('frame PUT/GET/DELETE round-trip through the same file-content tier as ../s
   assert.equal(get.status, 200);
   assert.equal(get.body.html, '<h1>Hi</h1>');
 
-  const del = await fetch(`${base}/api/v1/features/checkout-redesign/frames/hero.html`, { method: 'DELETE' });
+  const del = await fetch(`${base}/api/v1/features/checkout-redesign/frames/hero.html`, {
+    method: 'DELETE',
+    headers: AUTH_HEADERS,
+  });
   assert.equal(del.status, 204);
 });

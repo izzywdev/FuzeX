@@ -173,6 +173,15 @@ jobs:
           tags: |
             ${{ env.IMAGE_POSTGRES_TIER }}:${{ steps.tag.outputs.image_tag }}
             ${{ env.IMAGE_POSTGRES_TIER }}:latest
+          # Newly required, and it was the ONLY one of this workflow's three
+          # builds without it: backend/ now depends on the private
+          # @izzywdev/fuzefront-service-auth (GitHub Packages), so the
+          # backend-builder stage's `npm install` needs the token. Without it
+          # the build fails `npm error 401 ... authentication token not
+          # provided`. The vanilla and webapp-mfe builds above already pass it
+          # for their own private dependency.
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha,scope=fuzex-design-frames-postgres-tier
           cache-to: type=gha,scope=fuzex-design-frames-postgres-tier,mode=max
 

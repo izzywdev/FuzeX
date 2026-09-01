@@ -25,8 +25,20 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 24, was 20. services/design-frames-service/package.json has declared
+          # `engines.node: >=24.0.0` for a while and this job was quietly running
+          # under it (npm only warns EBADENGINE); the machine-auth dependency
+          # added for issue #26 declares the same floor, so the mismatch stops
+          # being cosmetic.
+          node-version: '24.x'
       - name: Install dependencies
+        # GITHUB_TOKEN is newly required: this service now depends on
+        # @izzywdev/fuzefront-service-auth, which lives on GitHub Packages.
+        # .npmrc reads ${GITHUB_TOKEN}; without it npm resolves the private
+        # package unauthenticated and fails with E401. It cost nothing before
+        # only because `dependencies` was empty and npm never hit the registry.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm install --no-audit --no-fund
       - name: Test
         run: npm test
@@ -42,6 +54,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # `packages: read` is REQUIRED and its absence is not obvious: declaring a
+      # `permissions:` block REPLACES the default token scopes rather than adding
+      # to them, so `contents: read` alone silently removed the package scope this
+      # job previously inherited. With the private
+      # @izzywdev/fuzefront-service-auth dependency (issue #26) that surfaces as
+      #   npm error 403 ... Permission installation not allowed to Read organization package
+      # — a token that IS present but is not allowed to read the package, which
+      # reads nothing like a missing-permission problem. The `test` job above
+      # declares no permissions block, inherits the default, and is unaffected.
+      packages: read
     services:
       postgres:
         image: postgres:16
@@ -98,12 +120,18 @@ jobs:
 
       - name: Build design-frames-service backend
         working-directory: services/design-frames-service/backend
+        # See the test job's note: the machine-auth dependency (issue #26) is a
+        # private GitHub Packages package, so these installs need the token.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm install --no-audit --no-fund
           npm run build
 
       - name: Install acceptance suite dependencies
         working-directory: services/design-frames-service/acceptance
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm install --no-audit --no-fund
 
       - name: Run acceptance suite against the real backend + real Postgres
@@ -135,7 +163,11 @@ jobs:
             services/design-frames-service
       - name: Smoke-check the built image serves /health (MF remote moved to webapp-mfe)
         run: |
-          docker run -d --name dfs-smoke -p 4400:4400 -e DESIGN_FRAMES_API_TOKENS=ci-smoke design-frames-service:ci
+          # FUZEFRONT_API_URL points at an unroutable host on purpose: this smoke
+          # check only asserts /health (unauthenticated) is served. Writes will
+          # 401 because introspection is unreachable — which is the correct,
+          # fail-closed behaviour, not a misconfiguration to paper over.
+          docker run -d --name dfs-smoke -p 4400:4400             -e FUZEFRONT_API_URL=http://fuzefront.invalid design-frames-service:ci
           for i in $(seq 1 20); do
             curl -sf http://127.0.0.1:4400/health && break
             sleep 1
@@ -165,8 +197,14 @@ jobs:
       # that needs a real DATABASE_URL, which is FuzeInfra's to provision,
       # never this repo's.
       - name: Build design-frames-service postgres-tier image (no push — build-only smoke check)
+        # The token is newly required: backend/ now depends on
+        # @izzywdev/fuzefront-service-auth (issue #26) from GitHub Packages, and
+        # the backend-builder stage reads it via a BuildKit secret.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           docker buildx build \
+            --secret id=github_token,env=GITHUB_TOKEN \
             --build-context identity=./packages/identity \
             --target postgres-tier \
             --load \

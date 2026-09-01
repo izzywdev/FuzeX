@@ -83,4 +83,5 @@ as the step that comes *after* local approval, not a replacement for local autho
 - Not the source of truth for frame *content* — that's always the consuming repo's own
   `design/frames/<feature>/**` (or equivalent).
 - Not Authentik/Permit-authenticated yet — writes use a static bearer token
-  (`DESIGN_FRAMES_API_TOKENS` on the service). Family-standard auth is a follow-up.
+  (a FuzeFront-issued machine token with the `fuzex:frames:write` scope,
+  verified against FuzeFront's introspection endpoint — issue #26).

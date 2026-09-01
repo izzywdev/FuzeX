@@ -119,13 +119,21 @@ RUN npm run build
 
 FROM node:24-alpine AS backend-builder
 WORKDIR /build/services/design-frames-service/backend
-COPY backend/package.json backend/package-lock.json ./
+COPY backend/package.json backend/package-lock.json backend/.npmrc ./
 COPY --from=identity-builder /build/packages/identity /build/packages/identity
 # --install-links: copies the local @fuzex/identity package.json's declared
 # `files` (dist/, package.json, README.md) into node_modules instead of
 # symlinking to /build/packages/identity — a symlink would dangle once this
 # stage's absolute paths are left behind by the final COPY --from below.
-RUN npm install --no-audit --no-fund --install-links
+#
+# .npmrc + the BuildKit token secret are newly required: this tier now depends
+# on @izzywdev/fuzefront-service-auth (issue #26), which lives on GitHub
+# Packages rather than registry.npmjs.org. Without them npm resolves it
+# unauthenticated and fails E401. A secret mount, not an ARG — an ARG is baked
+# into image history and `docker history` would print the token.
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" && \
+    npm install --no-audit --no-fund --install-links
 COPY backend/ ./
 # NOT `npm prune --omit=dev` — verified (locally, outside Docker, since this
 # sandbox has no daemon) that `npm prune` re-resolves the LOCAL `file:`
@@ -138,7 +146,9 @@ COPY backend/ ./
 # MODULE_NOT_FOUND at boot, before the app ever binds its port. A fresh
 # `--omit=dev --install-links` install (rather than pruning the existing
 # one) keeps the real copy.
-RUN npm run build \
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" && \
+    npm run build \
     && rm -rf node_modules \
     && npm install --no-audit --no-fund --omit=dev --install-links
 
@@ -195,10 +205,31 @@ CMD ["node", "backend/dist/index.js"]
 # No longer copies webapp-builder's output: the Module-Federation remote is
 # served by the `webapp-mfe` (nginx) image above now, not by this process.
 # This stage is REST API + the public /site review surface only.
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund || true
+# node:24, was node:20. This stage now installs a REAL dependency
+# (@izzywdev/fuzefront-service-auth, the machine-token verifier from issue #26)
+# whose package.json declares `engines.node: >=24.0.0` — and this service's OWN
+# package.json has declared `>=24.0.0` for some time, so the node:20 line was
+# already contradicting it. The earlier comment deferred this bump as "a
+# separate, repo-wide toolchain decision"; it stops being separable the moment
+# the runtime has a dependency it does not satisfy.
+COPY package.json .npmrc ./
+# .npmrc IS copied and the token IS mounted, both newly required: the auth
+# package lives on GitHub Packages under @izzywdev, not on registry.npmjs.org.
+# Without these the install resolves it against the public registry and 404s.
+#
+# A BuildKit secret, NOT an ARG: an ARG is baked into image history and
+# `docker history` would print the token. The secret exists only for this RUN.
+RUN --mount=type=secret,id=github_token \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" && \
+    npm install --omit=dev --no-audit --no-fund
+# NOT `|| true`. This install used to swallow its own failure, which was
+# survivable only while `dependencies` was empty — every failure mode was a
+# no-op. It no longer is: a swallowed failure now yields an image with no
+# node_modules, and server.js's `require('@izzywdev/fuzefront-service-auth')`
+# throws MODULE_NOT_FOUND at boot, before the port is ever bound. Fail the BUILD
+# instead, where it is visible.
 COPY . .
 
 ENV DESIGN_FRAMES_HOST=0.0.0.0
