@@ -157,6 +157,42 @@ async function main() {
     assert.strictEqual(res.status, 401);
   });
 
+  // The ORIGINAL fail-open, asserted directly. The old isAuthorized() opened
+  // with `if (TOKENS.size === 0) return true`, and TOKENS came from
+  // `(process.env.DESIGN_FRAMES_API_TOKENS || '').split(',').filter(Boolean)` —
+  // so UNSET, EMPTY STRING and a whitespace/comma-only value ALL produced an
+  // empty set and made every write unauthenticated. The secret was never sealed
+  // and was mounted `optional: true`, so that was the DEFAULT state of every
+  // environment, while the Helm chart claimed writes 401'd. Each of those
+  // inputs is replayed below and must be REJECTED, and the feature must not
+  // exist afterwards — a 401 that still wrote would be the same bug wearing a
+  // different status code.
+  for (const [label, value] of [
+    ['unset', undefined],
+    ['empty string', ''],
+    ['comma/whitespace only', ' , , '],
+  ]) {
+    await test(`FAIL-OPEN GUARD: empty token store (${label}) still REJECTS writes`, async () => {
+      if (value === undefined) delete process.env.DESIGN_FRAMES_API_TOKENS;
+      else process.env.DESIGN_FRAMES_API_TOKENS = value;
+
+      const slug = `fail-open-${label.replace(/[^a-z]+/g, '-')}`;
+      const res = await request(
+        port,
+        { method: 'POST', path: '/api/v1/features', headers: { 'Content-Type': 'application/json' } },
+        { slug, name: 'should never be created', description: 'x' }
+      );
+      delete process.env.DESIGN_FRAMES_API_TOKENS;
+
+      assert.strictEqual(res.status, 401, `empty token store (${label}) must NOT authorize a write`);
+
+      // And prove nothing was written.
+      const list = await request(port, { method: 'GET', path: '/api/v1/features' });
+      const created = (list.data.features || []).some((f) => (f.slug || f) === slug);
+      assert.strictEqual(created, false, 'the rejected write must not have created a feature');
+    });
+  }
+
   await test('reads stay public — no token required', async () => {
     const res = await request(port, { method: 'GET', path: '/api/v1/features' });
     assert.strictEqual(res.status, 200);

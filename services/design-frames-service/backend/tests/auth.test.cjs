@@ -205,14 +205,32 @@ test('setting DESIGN_FRAMES_API_TOKENS does not make it a usable credential', as
   assert.ok(err, 'the retired pre-shared token must not authenticate anything');
 });
 
-test('NO configuration makes writes open — the old empty-token-list bypass is gone', async () => {
-  // The previous implementation began `if (TOKENS.size === 0) return next();`,
-  // so an unset secret served an OPEN write API. There is no input that
-  // reproduces that here: with nothing configured, a write is still refused.
-  delete process.env.DESIGN_FRAMES_API_TOKENS;
-  const err = await run(fakeReq('POST'));
-  assert.ok(err, 'an unconfigured service must refuse writes, not allow them');
-});
+// The ORIGINAL fail-open, asserted directly. The previous middleware began
+// `if (TOKENS.size === 0) return next();`, and TOKENS came from
+// `(process.env.DESIGN_FRAMES_API_TOKENS || '').split(',').filter(Boolean)` — so
+// UNSET, EMPTY STRING and a comma/whitespace-only value ALL yielded an empty set
+// and made every write unauthenticated. The secret was never sealed and the
+// mount was `optional: true`, so that was the DEFAULT state of every
+// environment. Each input is replayed here and must be REJECTED.
+for (const [label, value] of [
+  ['unset', undefined],
+  ['empty string', ''],
+  ['comma/whitespace only', ' , , '],
+]) {
+  test(`FAIL-OPEN GUARD: empty token store (${label}) still REJECTS writes`, async () => {
+    if (value === undefined) delete process.env.DESIGN_FRAMES_API_TOKENS;
+    else process.env.DESIGN_FRAMES_API_TOKENS = value;
+
+    const noHeader = await run(fakeReq('POST'));
+    const withHeader = await run(fakeReq('POST', { authorization: 'Bearer anything-at-all' }));
+    delete process.env.DESIGN_FRAMES_API_TOKENS;
+
+    assert.ok(noHeader, `empty token store (${label}) must refuse an unauthenticated write`);
+    assert.equal(noHeader.code, 'UNAUTHORIZED');
+    assert.ok(withHeader, `empty token store (${label}) must not accept an arbitrary bearer`);
+    assert.equal(withHeader.code, 'UNAUTHORIZED');
+  });
+}
 
 test('extractBearer parses the "Bearer <token>" header shape only', () => {
   assert.equal(__testables.extractBearer({ headers: { authorization: 'Bearer abc' } }), 'abc');
