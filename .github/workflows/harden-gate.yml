@@ -290,6 +290,11 @@ jobs:
           # never ran — a new vacuous gate, introduced by the commit that removed four of
           # them. Discovery here is deliberately broad: this directory holds the self-tests
           # for every distributed script, and all of them must be known to fire.
+          # pyyaml+pynacl: this discovery is deliberately BROAD (test_*.py), so it runs the
+          # self-tests of every distributed script -- including test_gate_required_checks.py,
+          # whose gate has NO structural fallback and SystemExits without PyYAML. Matches
+          # the canonical harden-gate.yml, which installs both before this same line.
+          pip install -q pyyaml pynacl
           python -m unittest discover -s scripts/__tests__ -p 'test_*.py'
 
       - name: Identifier gate — contracts (enforcing)
