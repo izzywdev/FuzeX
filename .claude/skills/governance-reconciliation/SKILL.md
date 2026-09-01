@@ -20,7 +20,7 @@ Keeps a repo *converging*: nothing left half-done, no branch/PR/issue silently r
 
 ### 2. Open PRs — why open, what's needed to finish
 For each open PR, determine the blocker and act:
-- **Failing checks** → summarize the failure; if it's the kind `claude-ci-autofix` handles, nudge it; else note the fix needed.
+- **Failing checks** → summarize the failure; if it's the kind the CI-autofix caller (`fuze-ci-autofix.yml`, formerly `claude-ci-autofix.yml` — some repos still carry the old name until re-stamped) handles, nudge it; else note the fix needed.
 - **Merge conflict / behind base** → `gh pr update-branch` if safe; else flag.
 - **Awaiting review** → for solo repos, note it's ready (admin/auto-merge path); request the AI reviewer if configured.
 - **Green + approved + not deploy-sensitive** → note "ready to merge" (don't auto-merge deploy-on-push repos — those are deploy-window/human).
