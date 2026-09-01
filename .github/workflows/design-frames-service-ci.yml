@@ -54,6 +54,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # `packages: read` is REQUIRED and its absence is not obvious: declaring a
+      # `permissions:` block REPLACES the default token scopes rather than adding
+      # to them, so `contents: read` alone silently removed the package scope this
+      # job previously inherited. With the private
+      # @izzywdev/fuzefront-service-auth dependency (issue #26) that surfaces as
+      #   npm error 403 ... Permission installation not allowed to Read organization package
+      # — a token that IS present but is not allowed to read the package, which
+      # reads nothing like a missing-permission problem. The `test` job above
+      # declares no permissions block, inherits the default, and is unaffected.
+      packages: read
     services:
       postgres:
         image: postgres:16
