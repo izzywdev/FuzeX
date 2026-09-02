@@ -4,7 +4,7 @@
   "extends": "_base",
   "name": "FuzeX Design Review",
   "description": "Manages the product-design phase for a feature: navigable HTML frames, per-flow approval bound to a content stamp, and the API/component/flag contract seam — served by design-frames-service (services/design-frames-service). A caller asks it to list the design features currently in review, fetch a feature's frame manifest and rendered HTML, propose or revise a frame, approve or reject a flow, or get the shareable design-review site link. It holds its own store and tooling and returns outcomes; the caller needs no direct access to design-frames-service.",
-  "skills": ["ui-frame-contract", "design-system-conformance"],
+  "skills": ["fuzex-expert", "ui-frame-contract", "design-system-conformance"],
   "services": { "github": "none", "k8s": "none", "cloud": "none" },
   "a2a": {
     "examples": [
@@ -18,6 +18,6 @@
   },
   "metadata": {
     "managed_by": "agent-templates",
-    "note": "Backed by services/design-frames-service — a real, running service, not a placeholder (REST: services/design-frames-service/openapi.yaml; MCP: services/design-frames-service/mcp/tools.json). The card is PROJECTED by FuzeAgent's card_generator.py from this role's description + a2a.examples/tags, never hand-authored: a prior revision of this file carried a hand-written `card` object, which contracts/a2a/v1/card-projection.md §5 and FuzeSDLC governance/a2a-runtime-standard.md §4 both name as drift (the projection never reads it — the card served did not match this file), so it has been removed. `skills[]` names real .claude/skills/<name>/SKILL.md bundles this role's Claude SDK session loads (ui-frame-contract: the frame/manifest shape this role manages; design-system-conformance: the tokens-only rule design-frames-service's own manifest schema enforces on frame content) — distinct from the a2a.examples/tags above, which are card-projection discoverability hints, never filesystem skill names."
+    "note": "Backed by services/design-frames-service — a real, running service, not a placeholder (REST: services/design-frames-service/openapi.yaml; MCP: services/design-frames-service/mcp/tools.json). The card is PROJECTED by FuzeAgent's card_generator.py from this role's description + a2a.examples/tags, never hand-authored: a prior revision of this file carried a hand-written `card` object, which contracts/a2a/v1/card-projection.md §5 and FuzeSDLC governance/a2a-runtime-standard.md §4 both name as drift (the projection never reads it — the card served did not match this file), so it has been removed. `skills[]` names real .claude/skills/<name>/SKILL.md bundles this role's Claude SDK session loads (fuzex-expert: product/domain context — features, MCP tools, REST surface, capability-honesty + authz-boundary + provenance rules for any A2A-initiated action; ui-frame-contract: the frame/manifest shape this role manages; design-system-conformance: the tokens-only rule design-frames-service's own manifest schema enforces on frame content) — distinct from the a2a.examples/tags above, which are card-projection discoverability hints, never filesystem skill names."
   }
 }
