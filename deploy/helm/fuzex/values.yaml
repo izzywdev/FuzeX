@@ -223,3 +223,100 @@ federatedMount:
   host: ""
   annotations: {}
   path: /apps/fuzex
+
+# =============================================================================
+# a2a — FuzeX's OWN single-tenant A2A pod (templates/a2a.yaml).
+#
+# FuzeX is NOT a tenant of FuzeAgent's shared a2a-shared server (per-product
+# topology, contract v1.2.0). Runs ghcr.io/izzywdev/fuze-a2a — the ONE shared
+# runtime image — pointed at this repo's own `design-review` serving role
+# (agent-templates/roles/design-review/role.json). Per-product variation is
+# CONFIG ONLY: this block, never a second image or Dockerfile.
+#
+# Gate 1 of 2 — `tenants[0].enabled` is the other, and both must be on before
+# this pod actually serves. `enabled: false` here because
+# `a2aDeploy.providerApiKeySecretRef` is still null (see below) — flipping
+# this without that secret sealed starts a pod with no provider credential.
+# =============================================================================
+a2a:
+  enabled: false
+  image:
+    repository: ghcr.io/izzywdev/fuze-a2a
+    # Immutable SHA-12 tag = a FuzeAgent commit its release workflow built
+    # (release.yml: tag = ${GITHUB_SHA::12}). Never `latest` — templates/a2a.yaml
+    # refuses to render on `latest` or an empty tag, because a moving tag makes
+    # the deployed server unidentifiable.
+    #
+    # 624956d8983b CONFIRMED to exist by resolving it against the registry
+    # directly (anonymous GHCR token + manifest GET -> HTTP 200), not by
+    # assuming a release was green — it is also the tag FuzeAgent's own
+    # a2a-shared/values-prod.yaml currently pins, i.e. the latest bump its
+    # release.yml has made.
+    tag: "624956d8983b"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  protocolVersion: "1.0"
+  # ⇩ THE ONE VALUE THIS POD MUST NOT GET WRONG (contract v1.2.0). The server
+  # publishes this string VERBATIM as the card's AgentInterface.url, so it must
+  # equal this chart's own A2A Service: templates/a2a.yaml renders a fixed
+  # `a2a-fuzex` Service into the release namespace, and a render-time guard
+  # there fails the chart if the two ever disagree. Leaving it unset does not
+  # fail — it silently means the SHARED server, which is the whole trap.
+  inClusterUrl: http://a2a-fuzex.fuzex.svc.cluster.local:8080/rpc
+  # Machine-to-machine identity — NOT user identity. These authenticate other
+  # AGENTS calling this surface. Values match the family convention (FuzeFront's
+  # Authentik is the shared issuer for every product's A2A pod).
+  auth:
+    oidcIssuerUrl: https://app.fuzefront.com/application/o/fuzefront/
+    audience: a2a
+    callerClaim: repo
+    oidcDiscoveryUrl: http://authentik-server.fuzefront.svc.cluster.local:9000/application/o/fuzefront/.well-known/openid-configuration
+    # mTLS is in-cluster defence-in-depth on top of the bearer. Off until an
+    # `a2a-mtls-ca` SealedSecret exists in the fuzex namespace.
+    mtls:
+      enabled: false
+  # EXACTLY ONE entry — a per-product pod serves a single tenant, and
+  # templates/a2a.yaml refuses to render if more than one is enabled.
+  # `ref: master` — FuzeX's default branch (NOT main).
+  #
+  # `provider` is deliberately OMITTED rather than set to `{name: anthropic}`
+  # (its schema default anyway): gate_a2a.py's secretRef detector treats ANY
+  # mapping whose only key is `name` as a secretRef reference (it also matches
+  # `{name, key}`), so a bare `provider: {name: anthropic}` reads as an
+  # unresolved SealedSecret reference (false-positive C1) rather than the
+  # provider-selection field it actually is. Omitting it is schema-valid
+  # (provider is optional; its default is already "anthropic") and avoids
+  # tripping that heuristic on a field that names no secret at all.
+  tenants:
+    - tenant: FuzeX
+      repo: izzywdev/FuzeX
+      ref: master
+      enabled: true
+      entryRole: design-review
+      external: false
+
+# Deployment mechanics for the A2A pod. Kept OUT of `a2a` so that block stays
+# conformant to the frozen operator interface, which defines no templates.
+a2aDeploy:
+  replicas: 1
+  agentProvider: anthropic
+  gitImage: alpine/git:latest
+  resources:
+    requests:
+      cpu: 150m
+      memory: 384Mi
+    limits:
+      cpu: 1000m
+      memory: 896Mi
+  # SealedSecret refs — {name, key}, never values. Both null because neither
+  # Secret exists in the fuzex namespace yet:
+  #   reposGitTokenSecretRef:   not needed — FuzeX is a PUBLIC repo, anonymous
+  #                             `git clone` in the repo-sync init container works.
+  #   providerApiKeySecretRef:  { name: a2a-provider-anthropic, key: api-key }
+  #                             once devops-engineer seals it. Naming a Secret
+  #                             that cannot exist trades a readable config gap
+  #                             for a pod that crash-loops for no visible reason.
+  reposGitTokenSecretRef: null
+  providerApiKeySecretRef: null

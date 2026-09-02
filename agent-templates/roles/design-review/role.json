@@ -1,58 +1,23 @@
 {
+  "$schema": "../../schema/role-manifest.schema.json",
   "role": "design-review",
-  "repo": "izzywdev/FuzeX",
-  "servedBy": "services/design-frames-service",
-  "description": "First A2A serving role in this repo — see .fuze/manifest.json a2a block. Scaffolded against the general Agent Card shape (name/description/skills). NOT yet validated against contracts/a2a/v1/card-projection.md — that frozen contract lives outside this repo's scope for this change. a2a-maintainer CI (.github/workflows/a2a-maintain.yml, runs on every PR) should reconcile/correct this on the PR that introduces it before providesTo/enabled is trusted.",
-  "card": {
-    "name": "FuzeX Design Review",
-    "description": "Manages the product-design phase: navigable HTML frames, per-flow approval, and the API/component/flag contract seam for a feature, served by design-frames-service.",
-    "version": "0.1.0",
-    "capabilities": {
-      "streaming": false,
-      "pushNotifications": false
-    },
-    "defaultInputModes": ["application/json"],
-    "defaultOutputModes": ["application/json"],
-    "skills": [
-      {
-        "id": "list-design-features",
-        "name": "List design features",
-        "description": "List all features currently in the design phase, with frame counts and per-flow approval state.",
-        "tags": ["design", "frames", "read"]
-      },
-      {
-        "id": "get-design-feature",
-        "name": "Get a design feature",
-        "description": "Fetch one feature's manifest (build inventory, contract seam) and every frame's rendered HTML.",
-        "tags": ["design", "frames", "read"]
-      },
-      {
-        "id": "propose-design-frame",
-        "name": "Propose or revise a frame",
-        "description": "Create or replace one navigable HTML frame within a feature, including its acceptance notes and Playwright test hooks.",
-        "tags": ["design", "frames", "write"]
-      },
-      {
-        "id": "approve-design-flow",
-        "name": "Approve a design flow",
-        "description": "Approve one flow within a feature, binding the approval to the feature's current content stamp. Requires an authenticated caller (approvedBy is recorded).",
-        "tags": ["design", "approval", "write"]
-      },
-      {
-        "id": "get-design-review-site",
-        "name": "Get a design review link",
-        "description": "Get the public navigable review-site URL for a feature or a specific frame, for sharing with reviewers.",
-        "tags": ["design", "frames", "read"]
-      }
-    ]
+  "extends": "_base",
+  "name": "FuzeX Design Review",
+  "description": "Manages the product-design phase for a feature: navigable HTML frames, per-flow approval bound to a content stamp, and the API/component/flag contract seam — served by design-frames-service (services/design-frames-service). A caller asks it to list the design features currently in review, fetch a feature's frame manifest and rendered HTML, propose or revise a frame, approve or reject a flow, or get the shareable design-review site link. It holds its own store and tooling and returns outcomes; the caller needs no direct access to design-frames-service.",
+  "skills": ["fuzex-expert", "ui-frame-contract", "design-system-conformance"],
+  "services": { "github": "none", "k8s": "none", "cloud": "none" },
+  "a2a": {
+    "examples": [
+      "List the design features currently in review.",
+      "Fetch the frame manifest and rendered HTML for feature <slug>.",
+      "Propose or revise a frame in the <flow> flow of feature <slug>.",
+      "Approve the <flow> flow of feature <slug> against its current content stamp.",
+      "Get the shareable design-review site link for feature <slug>."
+    ],
+    "tags": ["design", "frames", "review", "approval"]
   },
-  "backing": {
-    "rest": {
-      "openapi": "services/design-frames-service/openapi.yaml"
-    },
-    "mcp": {
-      "server": "design-frames-service",
-      "tools": "services/design-frames-service/mcp/tools.json"
-    }
+  "metadata": {
+    "managed_by": "agent-templates",
+    "note": "Backed by services/design-frames-service — a real, running service, not a placeholder (REST: services/design-frames-service/openapi.yaml; MCP: services/design-frames-service/mcp/tools.json). The card is PROJECTED by FuzeAgent's card_generator.py from this role's description + a2a.examples/tags, never hand-authored: a prior revision of this file carried a hand-written `card` object, which contracts/a2a/v1/card-projection.md §5 and FuzeSDLC governance/a2a-runtime-standard.md §4 both name as drift (the projection never reads it — the card served did not match this file), so it has been removed. `skills[]` names real .claude/skills/<name>/SKILL.md bundles this role's Claude SDK session loads (fuzex-expert: product/domain context — features, MCP tools, REST surface, capability-honesty + authz-boundary + provenance rules for any A2A-initiated action; ui-frame-contract: the frame/manifest shape this role manages; design-system-conformance: the tokens-only rule design-frames-service's own manifest schema enforces on frame content) — distinct from the a2a.examples/tags above, which are card-projection discoverability hints, never filesystem skill names."
   }
 }

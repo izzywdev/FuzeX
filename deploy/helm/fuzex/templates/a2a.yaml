@@ -1,0 +1,248 @@
+{{- if .Values.a2a.enabled }}
+{{/*
+FuzeX A2A — this product's OWN single-tenant pod.
+
+Runs ghcr.io/izzywdev/fuze-a2a: the ONE shared agent-delegation runtime image
+(fuzeagent/agent-templates/a2a/Dockerfile). A caller hands it a GOAL rather
+than a function call, and the callee's agent accomplishes it with its own
+tools and credentials — the complement of design-frames-service's own MCP
+surface, which hands the caller TOOLS and expects the caller to hold the
+credentials (FuzeAgent docs/a2a/mcp-pod-vs-a2a-pod.md).
+
+FuzeX is NOT a tenant of FuzeAgent's shared a2a-shared server — it runs its
+OWN pod (per-product topology, contract v1.2.0 §"TOPOLOGY"), one Deployment
+plus a fixed-name Service, so a caller reaching this pod is reaching FuzeX
+specifically and nothing else's blast radius.
+
+  STILL enabled:false. `a2aDeploy.providerApiKeySecretRef` is null because no
+  `a2a-provider-anthropic` SealedSecret exists yet in the `fuzex` namespace —
+  see values.yaml next to `a2aDeploy`. Read that before flipping the gate; the
+  guards below refuse the mistakes that survive a green CI run.
+
+Every key under `a2a` comes from the FROZEN values interface
+(FuzeAgent agent-templates/contracts/a2a/v1/schema/values-interface.schema.json),
+which is additionalProperties:false at every level — nothing here is invented.
+Pure deployment mechanics live in the sibling `a2aDeploy` block, which the
+interface deliberately does not define.
+*/}}
+
+{{/* ------------------------------------------------------------------------
+     Fail-closed render guards.
+
+     These only run when the pod is ENABLED, and they exist because both failures
+     they catch are invisible at runtime: the pod comes up, passes every probe,
+     and serves a perfectly valid card that no caller can follow.
+     ------------------------------------------------------------------------ */}}
+{{- $port := int (default 8080 .Values.a2a.service.port) }}
+{{- $svcName := "a2a-fuzex" }}
+{{- $wantUrl := printf "http://%s.%s.svc.cluster.local:%d/rpc" $svcName .Release.Namespace $port }}
+{{- $tag := default "" .Values.a2a.image.tag }}
+{{- if or (eq $tag "") (eq $tag "latest") }}
+{{- fail (printf "a2a.image.tag is %q: pin an IMMUTABLE published tag of ghcr.io/izzywdev/fuze-a2a (the FuzeAgent commit SHA-12 its release built). `latest` and empty are refused — a moving tag makes the deployed server unidentifiable, and a tag that was never published leaves the pod in ImagePullBackOff while the release stays green." $tag) }}
+{{- end }}
+{{- if ne (default "" .Values.a2a.inClusterUrl) $wantUrl }}
+{{- fail (printf "a2a.inClusterUrl is %q but this chart's A2A Service resolves to %q. The card generator publishes inClusterUrl verbatim as AgentInterface.url, so a mismatch means every caller that follows this pod's card is routed somewhere else — the exact failure FuzeAgent#148 fixed, and it looks completely healthy from every other angle." (default "<unset>" .Values.a2a.inClusterUrl) $wantUrl) }}
+{{- end }}
+{{- $enabledTenants := 0 }}
+{{- range .Values.a2a.tenants }}
+{{- if .enabled }}
+{{- $enabledTenants = add1 $enabledTenants }}
+{{- end }}
+{{- end }}
+{{- if ne $enabledTenants 1 }}
+{{- fail (printf "a per-product A2A pod serves EXACTLY ONE tenant (values-interface: `A PER-PRODUCT pod carries exactly ONE entry`), but %d tenants are enabled. Multi-tenant serving is the shared server's job (FuzeAgent deploy/helm/a2a-shared)." $enabledTenants) }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: a2a-fuzex-values
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: fuzex
+    app.kubernetes.io/component: a2a
+data:
+  # Exactly the `a2a` block of the frozen operator interface, which is what
+  # runtime.build_from_env -> config.load_config reads via A2A_VALUES_FILE.
+  # Only secret REFERENCES (name/key) may appear here, never secret values.
+  values.json: |
+    {{ dict "a2a" .Values.a2a | toJson }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: a2a-fuzex
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: fuzex
+    app.kubernetes.io/component: a2a
+spec:
+  replicas: {{ .Values.a2aDeploy.replicas }}
+  selector:
+    matchLabels:
+      app: a2a-fuzex
+  template:
+    metadata:
+      labels:
+        app: a2a-fuzex
+        app.kubernetes.io/component: a2a
+      annotations:
+        # A ConfigMap change alone does not restart the pod, and the tenant/auth
+        # document is the pod's entire identity. Hash the CONTENT rather than the
+        # rendered template file: the ConfigMap lives in this same file, so
+        # including it here would recurse forever (helm lint does not catch that
+        # — only `helm template` does).
+        checksum/values: {{ dict "a2a" .Values.a2a | toJson | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Matches the image's non-root USER 10001.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      initContainers:
+        # runtime.py's LocalRepoResolver reads each tenant's projection inputs
+        # (.fuze/manifest.json + agent-templates/roles/) from A2A_REPOS_DIR/<tenant>.
+        # The server states the chart provides that checkout out of band.
+        # GitOps: the git ref is the source of truth, never live-mutated here.
+        #
+        # FuzeX is a PUBLIC repo, so no git token is needed to clone it — unlike
+        # FuzeBI's reference chart, `a2aDeploy.reposGitTokenSecretRef` stays null
+        # here by design, not by deferral.
+        - name: repo-sync
+          image: {{ .Values.a2aDeploy.gitImage }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              {{- if .Values.a2aDeploy.reposGitTokenSecretRef }}
+              AUTH="${A2A_REPOS_GIT_TOKEN}@"
+              {{- else }}
+              AUTH=""
+              {{- end }}
+              {{- range .Values.a2a.tenants }}
+              {{- if .enabled }}
+              name="{{ .tenant }}"   # resolved as /repos/<tenant>, case-preserved
+              echo "cloning {{ .repo }}@{{ .ref | default "main" }} -> /repos/${name}"
+              rm -rf "/repos/${name}"
+              git clone --depth 1 --branch "{{ .ref | default "main" }}" \
+                "https://${AUTH}github.com/{{ .repo }}.git" "/repos/${name}"
+              {{- end }}
+              {{- end }}
+          {{- with .Values.a2aDeploy.reposGitTokenSecretRef }}
+          env:
+            - name: A2A_REPOS_GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .key }}
+          {{- end }}
+          volumeMounts:
+            - name: repos
+              mountPath: /repos
+      containers:
+        - name: a2a
+          image: "{{ .Values.a2a.image.repository }}:{{ .Values.a2a.image.tag }}"
+          imagePullPolicy: {{ .Values.a2a.image.pullPolicy }}
+          # The listen port comes from the values file (service.port), NOT an env
+          # var, so the container port and the served port share one source.
+          ports:
+            - name: http
+              containerPort: {{ .Values.a2a.service.port }}
+          env:
+            # The server defaults to loopback (CWE-605-safe); bind all interfaces
+            # explicitly so the in-cluster Service can reach it.
+            - name: HOST
+              value: "0.0.0.0"
+            - name: A2A_VALUES_FILE
+              value: /config/values.json
+            - name: A2A_REPOS_DIR
+              value: /repos
+            - name: AGENT_PROVIDER
+              value: {{ .Values.a2aDeploy.agentProvider | quote }}
+            - name: FUZE_STATE_DIR
+              value: /state
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            {{- with .Values.a2aDeploy.providerApiKeySecretRef }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .key }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30   # repo clone + agent boot can be slow
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: values
+              mountPath: /config
+              readOnly: true
+            - name: repos
+              mountPath: /repos
+            - name: state
+              mountPath: /state
+          resources:
+            {{- toYaml .Values.a2aDeploy.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: values
+          configMap:
+            name: a2a-fuzex-values
+        - name: repos
+          emptyDir: {}
+        # FUZE_STATE_DIR must be writable — the server persists in-flight session
+        # state there. Ephemeral is correct for v1: in-flight tasks do not survive
+        # a restart, and pretending otherwise would need a real task engine.
+        - name: state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Deliberately a FIXED name, not release-prefixed. `a2a.inClusterUrl` is a plain
+  # string in values.yaml and it must equal this Service's DNS name exactly, so
+  # deriving the name from .Release.Name would let a rename silently republish an
+  # address this pod does not own. Same reasoning FuzeAgent's own chart pins
+  # `a2a-shared`, and the guard above enforces the two agree on every render.
+  name: a2a-fuzex
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: fuzex
+    app.kubernetes.io/component: a2a
+spec:
+  # ClusterIP only. The A2A surface authenticates callers by OIDC bearer, but it
+  # is an agent-delegation endpoint holding this product's credentials — it has
+  # no business being reachable from outside the cluster.
+  type: ClusterIP
+  selector:
+    app: a2a-fuzex
+  ports:
+    - name: http
+      port: {{ .Values.a2a.service.port }}
+      targetPort: http
+{{- end }}
