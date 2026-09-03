@@ -31,10 +31,12 @@
 #     FuzeFront's own app.fuzefront.com Ingress rules first) and is out of scope
 #     for this PR, which is about standing up the namespace + workload only.
 #
-# KNOWN, SEPARATE BLOCKER (not fixed by this PR, not this repo's to fix): GHCR
-# pulls are failing cluster-wide over IPv6 egress on the Contabo nodes. Even
-# with `enabled: true` and a real, public, existing image, the pod will land in
-# ImagePullBackOff until that node egress issue is resolved (FuzeInfra).
+# STALE NOTE, CORRECTED: an earlier revision claimed GHCR pulls were failing
+# cluster-wide over IPv6 egress on the Contabo nodes. That is not the case and
+# was never the cause here — fuzex-fuzex pulls
+# ghcr.io/izzywdev/fuzex-design-frames-service:0c25a457f047 successfully in prod
+# today. The webapp-mfe pod's ImagePullBackOff was purely a tag that had never
+# been published (see webappMfe.image.tag below).
 # =============================================================================
 enabled: true
 
@@ -74,7 +76,17 @@ webappMfe:
   image:
     # WEBAPP_MFE_IMAGE_TAG — bumped by release.yml's webapp-mfe build job the
     # same way image.tag above is bumped. DO NOT edit by hand.
-    tag: "0.1.0"
+    #
+    # Hand-corrected once, because the automated bump never reached this key:
+    # it was still the "0.1.0" placeholder, and ghcr.io/izzywdev/fuzex-webapp-mfe
+    # has NEVER published a 0.1.0 tag. The pod reported
+    #   ghcr.io/izzywdev/fuzex-webapp-mfe:0.1.0: not found
+    # (a definitive NotFound, not a 401 — the package is public, so the pull was
+    # authorized and the tag genuinely does not exist).
+    # 303e2020069c is the newest tag actually published for this package
+    # (2026-09-01T12:37:27Z), and the same release also published
+    # fuzex-design-frames-service:303e2020069c.
+    tag: "303e2020069c"
     pullPolicy: Always
 
 # =============================================================================
