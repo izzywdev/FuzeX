@@ -22,14 +22,22 @@
 #   write. The secret and the mechanism are both gone as of issue #26: writes now
 #   require a FuzeFront machine token, and there is nothing left to seal. The
 #   `fuzex-api-tokens` Secret should be DELETED from the cluster if it exists.)
-#   - ingress.enabled / ingress.host and federatedMount.enabled / .host stay OFF.
-#     ingress.host needs new DNS + a Cloudflare tunnel rule for a *.prod host —
-#     a FuzeInfra change, not this repo's to assume. federatedMount would reuse
-#     FuzeFront's EXISTING host (app.fuzefront.com) via a same-origin path route,
-#     so it needs no new DNS, but adding a second namespace's Ingress object
-#     against that host is a cross-repo routing decision (coordinate with
-#     FuzeFront's own app.fuzefront.com Ingress rules first) and is out of scope
-#     for this PR, which is about standing up the namespace + workload only.
+#   - ingress.enabled / ingress.host — the STANDALONE public origin, distinct
+#     from the same-origin portal mount below — stay OFF: ingress.host needs new
+#     DNS + a Cloudflare tunnel rule for a *.prod host, a FuzeInfra change, not
+#     this repo's to assume.
+#
+# NOW ENABLED — federatedMount.enabled / .host are ON below (host:
+# app.fuzefront.com); see the federatedMount block for the full rationale. This
+# is the same-origin /apps/fuzex Ingress the portal shell imports the remote
+# through — what makes the MFE load inside the FuzeFront portal (part of the
+# fleet-wide 2026-08-26 remount that turned this on across the family). It reuses
+# FuzeFront's EXISTING host via a same-origin path route, so it needs no new DNS;
+# it does place a second namespace's Ingress object against app.fuzefront.com, so
+# FuzeX must stay OUT of FuzeFront's prefix-stripping `federatedApps` loop (that
+# loop strips /apps/fuzex and would 404 every chunk of a remote built with base
+# '/apps/fuzex/'). This is a pass-through mount owned by this repo, not a
+# host-loop entry.
 #
 # KNOWN, SEPARATE BLOCKER (not fixed by this PR, not this repo's to fix): GHCR
 # pulls are failing cluster-wide over IPv6 egress on the Contabo nodes. Even
