@@ -1,4 +1,4 @@
-# fuze:managed template=fuze-code-review.yml baseline=v1.13.0 digest=sha256:aabd6ac4b094ed3c845bbbf3fbdd8462d5b2d33102167c514471bc2ffd61270b
+# fuze:managed template=fuze-code-review.yml baseline=v1 digest=sha256:940d1ea7a9408a3ee766a98c1ff29ab7a073f21b6b0667eddde17273403251b6
 name: Fuze Code Review
 
 # THE CANONICAL LLM CODE REVIEW + APPROVAL GATE.
@@ -149,26 +149,16 @@ jobs:
             REASON="no LLM credential configured (need one of LITELLM_FUZE_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) -- skipping, not failing: this is environmental, not a defect in the PR"
           fi
 
-          # Per-run nonce for the GITHUB_OUTPUT heredoc delimiters below. The diff and
-          # changed-file list are attacker-controlled (a PR can put any line in its own
-          # diff), so a FIXED delimiter is guessable: a diff containing a bare
-          # `FUZE_DIFF_EOF` line could close the heredoc early and inject/override later
-          # outputs — including `sensitive_files`, which feeds the self-approval defense in
-          # scripts/fuze_code_review_verdict.py. The `prompt` step below already nonces its
-          # delimiter for exactly this reason; do the same here so both heredocs use an
-          # unguessable, per-run terminator (GitHub's own recommended mitigation).
-          NONCE=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
-
           {
             echo "ready=${READY}"
             echo "reason=${REASON}"
             echo "any_sensitive=$([ -n "$SENSITIVE" ] && echo true || echo false)"
-            echo "sensitive_files<<FUZE_SENSITIVE_EOF_${NONCE}"
+            echo "sensitive_files<<FUZE_SENSITIVE_EOF"
             echo "$SENSITIVE"
-            echo "FUZE_SENSITIVE_EOF_${NONCE}"
-            echo "diff<<FUZE_DIFF_EOF_${NONCE}"
+            echo "FUZE_SENSITIVE_EOF"
+            echo "diff<<FUZE_DIFF_EOF"
             echo "$DIFF"
-            echo "FUZE_DIFF_EOF_${NONCE}"
+            echo "FUZE_DIFF_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Not reviewing this run
