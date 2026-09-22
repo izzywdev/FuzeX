@@ -16,7 +16,7 @@ impossible to recover once collected.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "fuzex.fullname" . }}-data
+  name: {{ include "fuzex.dataClaimName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "fuzex.labels" . | nindent 4 }}

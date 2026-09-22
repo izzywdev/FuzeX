@@ -65,6 +65,16 @@ image:
 
 persistence:
   enabled: true
+  # NODE-AGNOSTIC storage, deliberately. The k3s default is `local-path`, which
+  # binds the PV to a single node; when that node was tainted the claim's pod sat
+  # `Pending` for 7d+ on "didn't match PersistentVolume's node affinity" and FuzeX
+  # never appeared in the FuzeFront portal (FuzeInfra#980). `longhorn` replicates
+  # across nodes so the pod can schedule anywhere. Paired with the PVC rename in
+  # templates/_helpers.tpl (`fuzex.dataClaimName`) so Argo provisions a fresh
+  # longhorn claim instead of re-binding the stranded local-path one; the old
+  # claim is left behind (resource-policy: keep + Argo prune: false) and holds no
+  # data — the pod never ran.
+  storageClass: longhorn
   size: 5Gi
 
 ingress:

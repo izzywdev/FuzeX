@@ -149,7 +149,7 @@ spec:
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "fuzex.fullname" . }}-data
+            claimName: {{ include "fuzex.dataClaimName" . }}
           {{- else }}
           # emptyDir is for a throwaway local run ONLY. Every approval and stamp
           # this service holds is lost the moment the pod restarts, so
