@@ -31,6 +31,13 @@ persistence:
   enabled: true
   # Empty = the cluster's default StorageClass. Set explicitly if the default is
   # not the one you want this to land on.
+  #
+  # In prod this MUST be a node-agnostic (replicated) class, NOT the k3s default
+  # `local-path`: a local-path PV binds to one node, and when that node is
+  # tainted/reinstalled the claim's pod sits `Pending` forever on node affinity
+  # with no way to reschedule (FuzeInfra#980, and the same class of loss in
+  # FuzeInfra#924). values-prod.yaml sets `longhorn` for exactly this reason.
+  # Left empty here so local/kind renders fall back to the cluster default.
   storageClass: ""
   size: 2Gi
   mountPath: /data/features
