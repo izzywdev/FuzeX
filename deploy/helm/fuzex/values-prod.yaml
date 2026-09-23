@@ -11,9 +11,12 @@
 #      verified directly against the GHCR manifest API (anonymous pull token,
 #      HTTP 200), so the package is public and the tag exists. No imagePullSecret
 #      is required for it (see below).
-#   2. `fuzefront-registration` exists as a SealedSecret in the fuzex namespace
-#      (deploy/argocd/sealed/fuzefront-registration.yaml). The registration init
-#      container is fail-closed by design, so this was a hard prerequisite.
+#   2. `fuzefront-registration` is rendered by this chart as a SealedSecret in
+#      the fuzex namespace (templates/fuzefront-registration-sealed.yaml). It
+#      must live inside this chart: the Argo Application syncs only
+#      deploy/helm/fuzex, not the sibling deploy/argocd/sealed directory. The
+#      registration init container is fail-closed by design, so this is a hard
+#      prerequisite.
 #
 # STILL DEFERRED, deliberately NOT part of this change:
 #   (`fuzex-api-tokens` / DESIGN_FRAMES_API_TOKENS used to be listed here as
