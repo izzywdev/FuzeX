@@ -1,6 +1,6 @@
 // projectRepo.ts — design_frames.project (fxdf_prj_*).
 
-import { query } from '../lib/db';
+import { query, withTransaction } from '../lib/db';
 import { mintId, toUuid, fromUuid, type EntityId } from '../lib/identity';
 import { NotFoundError } from '../lib/errors';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
@@ -61,6 +61,38 @@ export async function createProject(input: ProjectCreateInput, log: ReqLogger): 
     log
   );
   return toProjectDTO(rows[0]);
+}
+
+/**
+ * Resolve an imported frame set's owning repository to one hosted app workspace.
+ *
+ * Imports are intentionally independent (a product can publish each feature from
+ * its own repository workflow), so asking every publisher to persist a FuzeX
+ * project id would make the app catalogue fragile. `sourceRepo` is already the
+ * durable provenance field on every manifest; use it as the stable grouping key.
+ * The advisory lock makes first import deterministic without making source_repo a
+ * globally unique user-facing field for manually-created workspaces.
+ */
+export async function getOrCreateImportedProject(sourceRepo: string, log: ReqLogger): Promise<ProjectDTO> {
+  const normalized = sourceRepo.trim();
+  if (!normalized) throw new Error('sourceRepo is required for imported project resolution');
+  return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [normalized]);
+    const existing = await client.query<ProjectRow>(
+      `select * from design_frames.project where source_repo = $1 order by created_at asc, id asc limit 1`,
+      [normalized]
+    );
+    if (existing.rows[0]) return toProjectDTO(existing.rows[0]);
+
+    const name = normalized.split('/').filter(Boolean).at(-1) || normalized;
+    const id = mintId('project');
+    const created = await client.query<ProjectRow>(
+      `insert into design_frames.project (id, name, description, source_repo)
+       values ($1, $2, $3, $4) returning *`,
+      [toUuid(id), name, `Imported design workspace for ${normalized}.`, normalized]
+    );
+    return toProjectDTO(created.rows[0]);
+  }, log);
 }
 
 export async function getProjectRowByUuid(uuid: string, log: ReqLogger): Promise<ProjectRow | null> {
