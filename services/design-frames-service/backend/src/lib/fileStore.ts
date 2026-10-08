@@ -45,6 +45,28 @@ export const putFrame: (slug: string, file: string, html: string) => Promise<voi
 export const getFrame: (slug: string, file: string) => Promise<string> = store.getFrame;
 export const deleteFrame: (slug: string, file: string) => Promise<void> = store.deleteFrame;
 export const setStamp: (slug: string, stamp: string) => Promise<Record<string, unknown>> = store.setStamp;
+export const importFeature: (
+  slug: string,
+  manifest: Record<string, unknown>,
+  frames: Map<string, string>,
+  expectedStamp?: string | null
+) => Promise<StoreRevision> = store.importFeature;
+export const commitRevision: (slug: string) => Promise<StoreRevision> = store.commitRevision;
+export const withCurrentRevision: <T>(
+  slug: string,
+  expectedStamp: string | undefined,
+  callback: (feature: StoreFeature, stamp: string) => Promise<T>,
+  approval?: { flowKey: string; value: Record<string, unknown> }
+) => Promise<T> = store.withCurrentRevision;
+export interface StoreRevision {
+  slug: string;
+  stamp: string;
+  metadata: { stamp: string; createdAt: string; sourceRepo: string | null; sourceStamp?: string | null; importerVersion?: string | null };
+  manifest: Record<string, unknown>;
+  frames: Map<string, string>;
+}
+export const listRevisions: (slug: string) => Promise<Array<StoreRevision['metadata']>> = store.listRevisions;
+export const getRevision: (slug: string, stamp: string) => Promise<StoreRevision> = store.getRevision;
 
 /**
  * Dual-write target for the append-only approval log: keeps

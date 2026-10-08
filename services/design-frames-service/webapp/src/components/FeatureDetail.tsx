@@ -9,11 +9,12 @@ import {
   EmptyState,
   Alert,
 } from '@izzywdev/fuzefront-design-system'
-import { getFeature, getStamp, siteFrameUrl, approveFlow, rejectFlow } from '../api'
-import type { Manifest, ManifestFrame, StampInfo } from '../types'
+import { getFeature, getStamp, getRevision, listRevisions, siteFrameUrl, approveFlow, rejectFlow } from '../api'
+import type { ContentRevision, Manifest, ManifestFrame, RevisionDetail, StampInfo } from '../types'
 import { ArrowLeftIcon } from './icons'
 import { ApproveFlowModal } from './ApproveFlowModal'
 import { RejectFlowModal } from './RejectFlowModal'
+import { FrameDiscussionPanel } from './FrameDiscussionPanel'
 
 interface FeatureDetailProps {
   slug: string
@@ -30,6 +31,8 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [stamp, setStamp] = useState<StampInfo | null>(null)
   const [selectedFrame, setSelectedFrame] = useState<ManifestFrame | null>(null)
+  const [revisions, setRevisions] = useState<ContentRevision[]>([])
+  const [revision, setRevision] = useState<RevisionDetail | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [approveTarget, setApproveTarget] = useState<string | null>(null)
   const [rejectTarget, setRejectTarget] = useState<string | null>(null)
@@ -38,6 +41,7 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
   const load = useCallback(() => {
     setState({ status: 'loading' })
     setActionError(null)
+    setRevision(null)
     getFeature(slug)
       .then(({ manifest }) => {
         setState({ status: 'ready', manifest })
@@ -50,6 +54,9 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
     getStamp(slug)
       .then(setStamp)
       .catch(() => setStamp(null))
+    listRevisions(slug)
+      .then(({ revisions }) => setRevisions(revisions))
+      .catch(() => setRevisions([]))
   }, [slug])
 
   useEffect(() => {
@@ -57,6 +64,23 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
   }, [load])
 
   const flows = state.status === 'ready' ? state.manifest.build?.flows ?? [] : []
+  const reviewManifest = revision?.manifest ?? (state.status === 'ready' ? state.manifest : null)
+
+  async function selectRevision(value: string) {
+    setActionError(null)
+    if (!value) {
+      setRevision(null)
+      if (state.status === 'ready') setSelectedFrame(state.manifest.frames?.[0] ?? null)
+      return
+    }
+    try {
+      const selected = await getRevision(slug, value)
+      setRevision(selected)
+      setSelectedFrame(selected.manifest.frames?.[0] ?? null)
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to load revision')
+    }
+  }
 
   async function handleApprove(approvedBy: string) {
     if (!approveTarget) return
@@ -135,6 +159,23 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
                   label={stamp.current ? 'Up to date' : 'Stale — recompute'}
                 />
               )}
+              {revisions.length > 0 && (
+                <label style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+                  Revision{' '}
+                  <select
+                    aria-label="Select frame revision"
+                    value={revision?.stamp ?? ''}
+                    onChange={(event) => void selectRevision(event.target.value)}
+                  >
+                    <option value="">Current working copy</option>
+                    {revisions.map((item) => (
+                      <option key={item.stamp} value={item.stamp}>
+                        {new Date(item.createdAt).toLocaleString()} · {item.stamp.slice(0, 12)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           </div>
 
@@ -144,7 +185,7 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
             </Alert>
           )}
 
-          {state.manifest.frames && state.manifest.frames.length > 0 ? (
+          {reviewManifest?.frames && reviewManifest.frames.length > 0 ? (
             <div
               style={{
                 display: 'grid',
@@ -157,7 +198,7 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
                 aria-label="Frames"
                 style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
               >
-                {state.manifest.frames.map((frame) => (
+                {reviewManifest.frames.map((frame) => (
                   <Button
                     key={frame.id}
                     variant={selectedFrame?.id === frame.id ? 'primary' : 'secondary'}
@@ -173,8 +214,10 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
               <div>
                 {selectedFrame ? (
                   <iframe
+                    sandbox=""
                     title={`Frame preview: ${selectedFrame.label}`}
-                    src={siteFrameUrl(slug, selectedFrame.file)}
+                    src={revision ? undefined : siteFrameUrl(slug, selectedFrame.file)}
+                    srcDoc={revision ? revision.frames[selectedFrame.file] : undefined}
                     style={{
                       width: '100%',
                       height: '70vh',
@@ -196,7 +239,11 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
             />
           )}
 
-          <h3
+          {revision && selectedFrame && (
+            <FrameDiscussionPanel slug={slug} stamp={revision.stamp} frame={selectedFrame} frameHtml={revision.frames[selectedFrame.file]} token={token} />
+          )}
+
+          {!revision && <h3
             style={{
               fontFamily: 'var(--font-display)',
               fontSize: 'var(--text-xl)',
@@ -205,8 +252,8 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
             }}
           >
             Flows
-          </h3>
-          {flows.length === 0 ? (
+          </h3>}
+          {!revision && (flows.length === 0 ? (
             <EmptyState compact title="No flows declared." />
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -240,7 +287,7 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
                 </li>
               ))}
             </ul>
-          )}
+          ))}
         </>
       )}
 

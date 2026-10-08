@@ -20,6 +20,7 @@ export const ENTITY_PREFIXES = {
   approval: 'fxdf_apr',
   discussion: 'fxdf_dsc',
   comment: 'fxdf_cmt',
+  generation: 'fxdf_gen',
 } as const;
 
 export type EntityType = keyof typeof ENTITY_PREFIXES;

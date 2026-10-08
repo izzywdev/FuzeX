@@ -8,6 +8,7 @@
 import { query } from '../lib/db';
 import { mintId, toUuid, fromUuid, type EntityId } from '../lib/identity';
 import type { ReqLogger } from '../lib/logger';
+import { ValidationError } from '../lib/errors';
 
 export type AuthorType = 'user' | 'agent';
 
@@ -58,10 +59,15 @@ export async function insertComment(input: CommentCreateInput, log: ReqLogger): 
   const id = mintId('comment');
   const { rows } = await query<CommentRow>(
     `insert into design_frames.comment (id, discussion_id, parent_comment_id, body, author_ref, author_type)
-     values ($1, $2, $3, $4, $5, $6) returning *`,
+     select $1, $2, $3, $4, $5, $6
+     where $3::uuid is null or exists (
+       select 1 from design_frames.comment parent
+       where parent.id = $3 and parent.discussion_id = $2
+     ) returning *`,
     [toUuid(id), input.discussionId, input.parentCommentId, input.body, input.authorRef, input.authorType],
     log
   );
+  if (!rows[0]) throw new ValidationError('parentCommentId must belong to the same discussion');
   return rows[0];
 }
 

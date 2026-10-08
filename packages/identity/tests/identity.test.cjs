@@ -80,7 +80,7 @@ test('entityTypeOf identifies the type without needing it in advance', () => {
   assert.equal(entityTypeOf('not-an-id'), null);
 });
 
-test('registry declares exactly the seven fxdf_* entity prefixes the contract reserves', () => {
+test('registry declares the fxdf_* lifecycle and draft-generation entity prefixes', () => {
   assert.deepEqual(ENTITY_PREFIXES, {
     project: 'fxdf_prj',
     feature: 'fxdf_ftr',
@@ -89,6 +89,7 @@ test('registry declares exactly the seven fxdf_* entity prefixes the contract re
     approval: 'fxdf_apr',
     discussion: 'fxdf_dsc',
     comment: 'fxdf_cmt',
+    generation: 'fxdf_gen',
   });
 });
 

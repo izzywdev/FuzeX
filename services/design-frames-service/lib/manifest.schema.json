@@ -40,6 +40,16 @@
       "type": "string",
       "description": "Which repo/product this feature's frames are FOR — e.g. 'FuzeFront', 'FuzeX'. Lets one design-frames-service serve multiple consuming products."
     },
+    "sourceStamp": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Original repository tree stamp before CSS embedding or adding hosted provenance fields."
+    },
+    "importerVersion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Importer transformation version that produced the hosted artifact."
+    },
     "frames": {
       "type": "array",
       "description": "The ordered frame sequence. Each frame belongs to a flow; approval is PER FLOW (see build.flows), so one flow can be approved and implemented while its siblings still iterate. May be empty on a freshly-created feature — design-frames-service supports incremental authorship (create the feature shell, then PUT each frame).",

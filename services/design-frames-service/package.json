@@ -8,7 +8,7 @@
     "start": "node server.js",
     "dev": "DESIGN_FRAMES_PORT=4400 node server.js",
     "mcp": "node mcp/server.js",
-    "test": "node tests/stamp.test.cjs && node tests/schema.test.cjs && node tests/store.test.cjs && node tests/server.test.cjs && node tests/mcp.test.cjs"
+    "test": "node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@izzywdev/fuzefront-service-auth": "^0.1.1"

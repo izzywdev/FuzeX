@@ -1,0 +1,28 @@
+{{- /* FuzeInfra publish-sealed-handoff owns the ciphertext file. Keep Helm
+expressions here so kubeseal --merge-into can refresh that static YAML safely. */ -}}
+{{- $raw := .Files.Get "files/secrets/design-frames-db-sealed.yaml" -}}
+{{- if $raw -}}
+{{- $secret := $raw | fromYaml -}}
+{{- if or (ne $secret.apiVersion "bitnami.com/v1alpha1") (ne $secret.kind "SealedSecret") -}}
+{{- fail "design-frames-db handoff must contain a SealedSecret" -}}
+{{- end -}}
+{{- if or (ne $secret.metadata.namespace .Release.Namespace) (ne $secret.metadata.name .Values.postgresTier.databaseSecret.name) -}}
+{{- fail "design-frames-db handoff scope must match release namespace and postgresTier.databaseSecret.name" -}}
+{{- end -}}
+{{- if or (ne $secret.spec.template.metadata.namespace .Release.Namespace) (ne $secret.spec.template.metadata.name .Values.postgresTier.databaseSecret.name) -}}
+{{- fail "design-frames-db Secret template scope must match its sealed scope" -}}
+{{- end -}}
+{{- if or (hasKey $secret.spec "data") (hasKey $secret.spec "stringData") -}}
+{{- fail "design-frames-db handoff must contain encryptedData only" -}}
+{{- end -}}
+{{- if or (hasKey $secret.spec.template "data") (hasKey $secret.spec.template "stringData") -}}
+{{- fail "design-frames-db Secret template must not contain plaintext data" -}}
+{{- end -}}
+{{- if not (get $secret.spec.encryptedData .Values.postgresTier.databaseSecret.key) -}}
+{{- fail "design-frames-db handoff is missing the configured encrypted database key" -}}
+{{- end -}}
+{{- $annotations := default (dict) $secret.metadata.annotations -}}
+{{- $_ := set $annotations "argocd.argoproj.io/sync-wave" "-2" -}}
+{{- $_ := set $secret.metadata "annotations" $annotations -}}
+{{- toYaml $secret -}}
+{{- end -}}

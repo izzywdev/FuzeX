@@ -228,17 +228,19 @@ test('PUT manifest declares a flow; GET feature reflects it unapproved', async (
   assert.equal(get.body.manifest.build.flows[0].approved, undefined); // not yet approved, no bookkeeping written
 });
 
-test('legacy {approvedBy}-only approve still succeeds and projects onto the manifest read', async () => {
+test('legacy {approvedBy}-only approve uses the verified actor and projects onto the manifest read', async () => {
   const approve = await j('POST', '/api/v1/features/checkout-redesign/flows/primary/approve', {
     approvedBy: 'alice@example.com',
   });
   assert.equal(approve.status, 200);
   assert.match(approve.body.id, /^fxdf_apr_/);
-  assert.equal(approve.body.contentStamp, null);
+  assert.match(approve.body.contentStamp, /^[a-f0-9]{64}$/);
+  assert.equal(approve.body.actorRef, 'svc-integration');
+  assert.equal(approve.body.actorType, 'agent');
 
   const get = await j('GET', '/api/v1/features/checkout-redesign');
   assert.equal(get.body.manifest.build.flows[0].approved, true);
-  assert.equal(get.body.manifest.build.flows[0].approvedBy, 'alice@example.com');
+  assert.equal(get.body.manifest.build.flows[0].approvedBy, 'svc-integration');
 });
 
 test('reject now REQUIRES reason (v0.2.0 tightening)', async () => {
@@ -252,6 +254,8 @@ test('reject now REQUIRES reason (v0.2.0 tightening)', async () => {
   assert.equal(ok.status, 200);
   assert.equal(ok.body.decision, 'reject');
   assert.equal(ok.body.reason, 'needs another pass');
+  assert.equal(ok.body.actorRef, 'svc-integration');
+  assert.equal(ok.body.actorType, 'agent');
 });
 
 test('approve with a stale contentStamp is rejected with 409 StampConflict', async () => {
@@ -364,6 +368,8 @@ test('POST /api/v1/discussions on a project works end to end, then comments thre
   });
   assert.equal(comment1.status, 201);
   assert.match(comment1.body.id, /^fxdf_cmt_/);
+  assert.equal(comment1.body.authorRef, 'svc-integration');
+  assert.equal(comment1.body.authorType, 'agent');
 
   const comment2 = await j('POST', `/api/v1/discussions/${discussionId}/comments`, {
     body: 'because reasons',
@@ -411,4 +417,81 @@ test('frame PUT/GET/DELETE round-trip through the same file-content tier as ../s
     headers: AUTH_HEADERS,
   });
   assert.equal(del.status, 204);
+});
+
+// Generated content follows the real authenticated draft -> immutable revision lifecycle.
+const generationBrief = {
+  flowId: 'welcome', title: 'Welcome flow', goal: 'Join a workspace',
+  steps: [{ title: 'Welcome', description: 'Explain the workspace', action: 'Continue' },
+    { title: 'Choose team', description: 'Select a team', action: 'Join' }],
+};
+
+test('generation preview is isolated, apply publishes unapproved immutable content and all frame refs, retry is idempotent', async () => {
+  assert.equal((await j('POST', '/api/v1/features', { slug: 'generation-lifecycle', name: 'Generation' })).status, 201);
+  assert.equal((await j('PUT', '/api/v1/features/generation-lifecycle/frames/existing.html', { html: '<h1>Existing</h1>' })).status, 200);
+  const initial = await j('POST', '/api/v1/features/generation-lifecycle/stamp', {});
+  const baseStamp = initial.body.stamp;
+  const preview = await j('POST', '/api/v1/features/generation-lifecycle/generations', { baseStamp, brief: generationBrief });
+  assert.equal(preview.status, 201);
+  assert.match(preview.body.id, /^fxdf_gen_/);
+  assert.equal(preview.body.status, 'draft');
+  assert.equal(preview.body.actorRef, 'svc-integration');
+  assert.equal(preview.body.draft.frames.length, 2);
+  const { query } = require('../dist/lib/db.js');
+  const stored = await query(`select draft from design_frames.generation where feature_id = (select id from design_frames.feature where slug=$1)`, ['generation-lifecycle']);
+  assert.equal(stored.rows[0].draft.engine, 'deterministic-wireframe-v1');
+  assert.equal(stored.rows[0].draft.frames[0].html, undefined);
+  const before = await j('GET', '/api/v1/features/generation-lifecycle');
+  assert.equal(Object.keys(before.body.frames).length, 1);
+  assert.equal((await j('GET', '/api/v1/features/generation-lifecycle/stamp')).body.stamp, baseStamp);
+  const id = preview.body.id;
+  const list = await j('GET', '/api/v1/features/generation-lifecycle/generations');
+  assert.equal(list.body.generations[0].id, id);
+  assert.equal(list.body.generations[0].frameCount, 2);
+  assert.equal(list.body.generations[0].draft, undefined);
+  assert.equal((await j('GET', `/api/v1/features/generation-lifecycle/generations/${id}`)).body.draft.brief.flowId, 'welcome');
+  const applied = await j('POST', `/api/v1/features/generation-lifecycle/generations/${id}/apply`, { baseStamp });
+  assert.equal(applied.status, 200);
+  assert.equal(applied.body.status, 'applied');
+  assert.notEqual(applied.body.resultStamp, baseStamp);
+  const revision = await j('GET', `/api/v1/features/generation-lifecycle/revisions/${applied.body.resultStamp}`);
+  assert.equal(Object.keys(revision.body.frames).length, 3);
+  assert.equal(revision.body.frames['existing.html'], '<h1>Existing</h1>');
+  assert.equal(revision.body.manifest.build.flows[0].approved, false);
+  assert.equal(revision.body.manifest.build.flows[0].status, 'draft');
+  const refs = await j('GET', `/api/v1/features/generation-lifecycle/revisions/${applied.body.resultStamp}/frame-refs`);
+  assert.equal(refs.body.frames.length, 3);
+  const history = await j('GET', `/api/v1/features/generation-lifecycle/revisions/${baseStamp}`);
+  assert.equal(Object.keys(history.body.frames).length, 1);
+  assert.equal((await j('POST', `/api/v1/features/generation-lifecycle/generations/${id}/apply`, { baseStamp })).body.resultStamp, applied.body.resultStamp);
+  // Simulate successful content publication followed by failed DB completion.
+  await query(`update design_frames.generation set status='draft',result_stamp=null where feature_id = (select id from design_frames.feature where slug=$1)`, ['generation-lifecycle']);
+  const recovered = await j('POST', `/api/v1/features/generation-lifecycle/generations/${id}/apply`, { baseStamp });
+  assert.equal(recovered.status, 200);
+  assert.equal(recovered.body.resultStamp, applied.body.resultStamp);
+  assert.equal((await j('GET', '/api/v1/features/generation-lifecycle/revisions')).body.revisions.length, 2);
+  assert.equal((await j('POST', `/api/v1/features/generation-lifecycle/generations/${id}/dismiss`, {})).status, 409);
+});
+
+test('generation guards stale publication, dismissal, invalid input, cross-feature access and unauthenticated writes', async () => {
+  assert.equal((await j('POST', '/api/v1/features', { slug: 'generation-guards' })).status, 201);
+  const baseStamp = (await j('POST', '/api/v1/features/generation-guards/stamp', {})).body.stamp;
+  const invalid = await j('POST', '/api/v1/features/generation-guards/generations', { baseStamp, brief: { ...generationBrief, flowId: '../bad' } });
+  assert.equal(invalid.status, 400);
+  const unauthenticated = await fetch(`${base}/api/v1/features/generation-guards/generations`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseStamp, brief: generationBrief }),
+  });
+  assert.equal(unauthenticated.status, 401);
+  const preview = await j('POST', '/api/v1/features/generation-guards/generations', { baseStamp, brief: generationBrief });
+  assert.equal(preview.status, 201);
+  const id = preview.body.id;
+  assert.equal((await j('GET', `/api/v1/features/generation-lifecycle/generations/${id}`)).status, 404);
+  await j('PUT', '/api/v1/features/generation-guards/frames/new.html', { html: '<h1>Changed by another author</h1>' });
+  assert.equal((await j('POST', `/api/v1/features/generation-guards/generations/${id}/apply`, { baseStamp })).status, 409);
+  assert.equal((await j('GET', `/api/v1/features/generation-guards/generations/${id}`)).body.status, 'draft');
+  const dismissed = await j('POST', `/api/v1/features/generation-guards/generations/${id}/dismiss`, {});
+  assert.equal(dismissed.body.status, 'dismissed');
+  assert.equal((await j('POST', `/api/v1/features/generation-guards/generations/${id}/dismiss`, {})).status, 200);
+  assert.equal((await j('POST', `/api/v1/features/generation-guards/generations/${id}/apply`, { baseStamp })).status, 409);
+  assert.equal(Object.keys((await j('GET', '/api/v1/features/generation-guards')).body.frames).length, 1);
 });

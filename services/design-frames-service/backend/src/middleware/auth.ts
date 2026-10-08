@@ -46,6 +46,7 @@ import { ForbiddenError, UnauthorizedError } from '../lib/errors';
 /** Requests that have passed `requireAuthForWrites` carry the verified caller. */
 export interface AuthenticatedRequest extends Request {
   machineIdentity?: MachineIdentity;
+  delegatedIdentity?: MachineIdentity;
 }
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -60,6 +61,8 @@ const FUZEFRONT_API_URL = process.env.FUZEFRONT_API_URL;
 
 /** Scope a machine token must carry to write. */
 export const REQUIRED_SCOPE = process.env.DESIGN_FRAMES_REQUIRED_SCOPE || 'fuzex:frames:write';
+export const READ_SCOPE = 'fuzex:frames:read';
+export const DELEGATION_AUDIENCE = 'service:fuzex';
 
 if (!FUZEFRONT_API_URL && process.env.NODE_ENV === 'production') {
   // Refuse to boot rather than serve writes we cannot authenticate. The
@@ -76,17 +79,34 @@ const verifier: MachineTokenVerifier = createMachineTokenVerifier({
   cacheTtlSeconds: Number(process.env.DESIGN_FRAMES_INTROSPECTION_CACHE_SECONDS ?? 5),
 });
 
-function extractBearer(req: Request): string | null {
-  const header = req.headers['authorization'] || '';
-  if (!header.startsWith('Bearer ')) return null;
-  return header.slice('Bearer '.length).trim();
+function extractBearer(req: Request, name = 'authorization'): string | null {
+  const header = req.headers[name];
+  if (typeof header !== 'string') return null;
+  return /^Bearer ([^\s,]+)$/.exec(header)?.[1] ?? null;
+}
+
+// Read verified introspection claims from raw as well: older published
+// service-auth versions preserve them there without normalizing these fields.
+function delegationClaims(identity: MachineIdentity): {
+  tokenKind?: string; audience?: string; actor?: { sub?: string };
+} {
+  return identity.raw as ReturnType<typeof delegationClaims>;
+}
+
+/** Audit attribution always comes from a verified principal, never JSON. */
+export function authenticatedActor(req: AuthenticatedRequest): { actorRef: string; actorType: 'user' | 'agent' } {
+  if (req.delegatedIdentity) return { actorRef: req.delegatedIdentity.subject, actorType: 'user' };
+  if (req.machineIdentity) return { actorRef: req.machineIdentity.subject, actorType: 'agent' };
+  throw new UnauthorizedError('a verified caller is required');
 }
 
 /**
  * Gate every write method behind a verified FuzeFront machine identity.
  *
- * Reads pass through untouched — the design-review surface is deliberately
- * public (see server.js's header note).
+ * Public reads remain supported. A presented delegation is always checked,
+ * including on reads: malformed or invalid credentials never silently become
+ * an anonymous request. Hosted browsers carry only their FuzeFront session;
+ * its server exchanges it and supplies both credentials below.
  *
  * Errors go to the shared `errorHandler` as typed errors rather than being
  * written here, so this tier keeps ONE error-body shape across every route.
@@ -101,13 +121,16 @@ export function requireAuthForWrites(
   _res: Response,
   next: NextFunction
 ): void {
-  if (!WRITE_METHODS.has(req.method)) {
+  const isWrite = WRITE_METHODS.has(req.method);
+  const hasDelegation = req.headers['x-fuze-delegation'] !== undefined;
+  if (!isWrite && !hasDelegation) {
     next();
     return;
   }
 
   const token = extractBearer(req);
-  if (!token) {
+  const delegationToken = extractBearer(req, 'x-fuze-delegation');
+  if (!token || (hasDelegation && !delegationToken)) {
     next(
       new UnauthorizedError(
         'Unauthorized — a FuzeFront machine token is required for write operations'
@@ -116,10 +139,31 @@ export function requireAuthForWrites(
     return;
   }
 
-  verifier
-    .verifyMachineToken(token)
-    .then((identity) => {
-      if (!identity.scopes.includes(REQUIRED_SCOPE)) {
+  Promise.all([
+    verifier.verifyMachineToken(token),
+    delegationToken ? verifier.verifyMachineToken(delegationToken) : Promise.resolve(null),
+  ])
+    .then(([identity, delegated]) => {
+      const machineClaims = delegationClaims(identity);
+      if (delegated) {
+        const claims = delegationClaims(delegated);
+        const requiredScope = isWrite ? REQUIRED_SCOPE : READ_SCOPE;
+        if (
+          machineClaims.tokenKind !== 'fuze-workload' ||
+          claims.tokenKind !== 'fuze-delegation' ||
+          claims.audience !== DELEGATION_AUDIENCE ||
+          claims.actor?.sub !== identity.subject ||
+          !delegated.scopes.includes(requiredScope) ||
+          (identity.tenantId !== null && identity.tenantId !== delegated.tenantId)
+        ) {
+          next(new ForbiddenError('Forbidden — delegation does not authorize this caller or operation'));
+          return;
+        }
+        req.delegatedIdentity = delegated;
+      } else if (machineClaims.tokenKind === 'fuze-delegation') {
+        next(new ForbiddenError('Forbidden — delegation requires its authenticated service actor'));
+        return;
+      } else if (!identity.scopes.includes(REQUIRED_SCOPE)) {
         next(new ForbiddenError(`Forbidden — token lacks the ${REQUIRED_SCOPE} scope`));
         return;
       }

@@ -36,6 +36,12 @@ function validateManifest(manifest) {
   if (manifest.stamp !== undefined && !SHA256.test(manifest.stamp)) {
     err(errors, 'stamp', 'must be a bare lowercase sha256 hex digest');
   }
+  if (manifest.sourceStamp !== undefined && !SHA256.test(manifest.sourceStamp)) {
+    err(errors, 'sourceStamp', 'must be a bare lowercase sha256 hex digest');
+  }
+  if (manifest.importerVersion !== undefined && (typeof manifest.importerVersion !== 'string' || !manifest.importerVersion)) {
+    err(errors, 'importerVersion', 'must be a non-empty string');
+  }
 
   if (!Array.isArray(manifest.frames)) {
     err(errors, 'frames', 'required array (may be empty on a freshly-created feature, before any frame is uploaded)');

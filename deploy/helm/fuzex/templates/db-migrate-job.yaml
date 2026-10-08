@@ -4,16 +4,15 @@ db-migrate — applies services/design-frames-service/db/migrations/**
 (db/migrate.sh) against DATABASE_URL before the postgres-tier Deployment
 above is synced/rolled.
 
-ARGO CD PreSync HOOK, NOT a Helm pre-install/pre-upgrade hook — chosen
+ARGO CD Sync HOOK in wave -1, NOT a Helm pre-install/pre-upgrade hook — chosen
 because this chart is applied ONLY by Argo CD (deploy/argocd/application.yaml,
 `syncPolicy.automated`; nobody runs `helm upgrade --install` by hand or in CI
 here — see that file's header comment). Argo's own sync-wave/hook lifecycle
-is what actually governs this chart in every real environment, so a hook
-Argo itself understands natively is the correct mechanism, not a Helm-CLI
-convention this repo never otherwise exercises. db/README.md already names
-this by role: "In-cluster, this script is the entrypoint for a pre-sync
-Argo/Helm Job... not an init-container racing multiple replicas, and not run
-at app startup."
+is what actually governs this chart in every real environment. A PreSync hook
+would run BEFORE the ordinary SealedSecret on first deployment, blocking its
+own credential delivery. The secret is applied and becomes healthy in wave -2;
+this Sync hook completes in wave -1 before the writer rollout (waves 0/1).
+It is not an init-container racing replicas and does not run at app startup.
 
 HookSucceeded deletion: migrate.sh is idempotent (db/README.md — tracked via
 design_frames._migrations, every file independently re-runnable), so nothing
@@ -29,10 +28,12 @@ metadata:
     {{- include "fuzex.labels" . | nindent 4 }}
     app.kubernetes.io/component: db-migrate
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: {{ .Values.postgresTier.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.postgresTier.migration.activeDeadlineSeconds }}
   template:
     metadata:
       labels:

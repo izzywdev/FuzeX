@@ -40,7 +40,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "fuzex.fullname" . }}
+                name: {{ include "fuzex.fullname" . }}{{ if .Values.postgresTier.enabled }}-postgres-tier{{ end }}
                 port:
-                  number: {{ .Values.service.port }}
+                  number: {{ if .Values.postgresTier.enabled }}{{ .Values.postgresTier.service.port }}{{ else }}{{ .Values.service.port }}{{ end }}
 {{- end }}

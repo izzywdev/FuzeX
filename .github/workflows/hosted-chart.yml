@@ -1,0 +1,29 @@
+name: Hosted workspace chart
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/helm/fuzex/**'
+      - 'scripts/check-hosted-chart.py'
+      - '.github/workflows/hosted-chart.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'deploy/helm/fuzex/**'
+      - 'scripts/check-hosted-chart.py'
+      - '.github/workflows/hosted-chart.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4
+        with:
+          version: v3.16.4
+      - run: pip install PyYAML==6.0.3
+      - run: python scripts/check-hosted-chart.py
+      - run: helm lint deploy/helm/fuzex -n fuzex -f deploy/helm/fuzex/values-prod.yaml --set postgresTier.enabled=true

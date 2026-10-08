@@ -11,7 +11,7 @@ import type { FeatureSummary } from '../types'
 import { RetryIcon } from './icons'
 
 const COLUMNS = [
-  { key: 'name', header: 'Feature' },
+  { key: 'name', header: 'UX area' },
   { key: 'frames', header: 'Frames', align: 'center' as const },
   { key: 'flows', header: 'Flows approved', align: 'center' as const },
   { key: 'sourceRepo', header: 'For' },
@@ -53,7 +53,7 @@ export function FeatureList({ onSelect }: FeatureListProps) {
           margin: '0 0 var(--space-4)',
         }}
       >
-        Features
+        Apps and UX flows
       </h2>
 
       {state.status === 'error' && (
@@ -77,8 +77,8 @@ export function FeatureList({ onSelect }: FeatureListProps) {
           emptyState={
             <EmptyState
               compact
-              title="No features yet"
-              body="Once product-designer authors frames for a feature, they'll show up here."
+              title="No imported UX areas yet"
+              body="Import a product repository's design/frames directory to begin review."
             />
           }
         >

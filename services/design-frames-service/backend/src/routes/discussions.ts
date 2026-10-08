@@ -4,7 +4,9 @@
 import { Router, type Request } from 'express';
 import * as discussionRepo from '../repositories/discussionRepo';
 import * as commentRepo from '../repositories/commentRepo';
+import * as frameRefRepo from '../repositories/frameRefRepo';
 import { requireFeatureRowBySlug } from '../repositories/featureRepo';
+import * as fileStore from '../lib/fileStore';
 import {
   assertRef,
   fromUuid,
@@ -17,6 +19,7 @@ import { NotFoundError, ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import { query } from '../lib/db';
 import type { LoggedRequest } from '../lib/logger';
+import { authenticatedActor } from '../middleware/auth';
 
 export const discussionsRouter = Router();
 export const featureDiscussionsRouter = Router();
@@ -27,21 +30,11 @@ function log(req: Request) {
   return (req as LoggedRequest).log!;
 }
 
-// The Comment author reference is SERVER-DERIVED, never client-chosen
-// (identifier-standard: "an id is never a capability" — a client must not
-// be able to name who authored a row; openapi.yaml's CommentCreate is
-// additionalProperties:false and declares NO `authorRef` property, only
-// `body`/`parentCommentId`/`authorType`). This service authenticates writes
-// with a single SHARED bearer token (middleware/auth.ts) rather than a
-// per-user principal, so there is no real per-user identity to derive from
-// yet — this constant stands in for "the authenticated service actor" until
-// the auth model carries one. See PR description: a richer per-user
-// authorRef needs a per-user auth model upstream of this service.
-const SERVICE_ACTOR_REF = 'service-actor';
-
-function resolveActor(body: Record<string, unknown>): { authorRef: string; authorType: 'user' | 'agent' } {
-  const authorType = body.authorType === 'agent' ? 'agent' : 'user';
-  return { authorRef: SERVICE_ACTOR_REF, authorType };
+// Client authorType remains accepted for compatibility, but cannot override
+// the verified delegated user or machine principal used for audit records.
+function resolveActor(req: Request): { authorRef: string; authorType: 'user' | 'agent' } {
+  const { actorRef, actorType } = authenticatedActor(req);
+  return { authorRef: actorRef, authorType: actorType };
 }
 
 function toWireDiscussion(row: discussionRepo.DiscussionRow): ReturnType<typeof discussionRepo.toDiscussionDTO> {
@@ -105,6 +98,10 @@ discussionsRouter.post('/', async (req, res) => {
   const exists = await targetExists(targetType as DiscussionTargetType, targetRefUuid, log(req));
   if (!exists) throw new NotFoundError(`${targetType} '${body.targetRef}' not found`);
 
+  if (targetType === 'element') {
+    await assertSelectorExistsInRevision(targetRefUuid, body.targetSelector as string, log(req));
+  }
+
   const row = await discussionRepo.createDiscussion(
     {
       targetType: targetType as DiscussionTargetType,
@@ -116,6 +113,34 @@ discussionsRouter.post('/', async (req, res) => {
   );
   res.status(201).json(toWireDiscussion(row));
 });
+
+async function assertSelectorExistsInRevision(frameRefUuid: string, selector: string, reqLog: ReturnType<typeof log>) {
+  const frame = await frameRefRepo.resolveFrameRef(frameRefUuid, reqLog);
+  if (!frame) throw new NotFoundError(`frame '${frameRefUuid}' not found`);
+  const revision = await fileStore.getRevision(frame.feature_slug, frame.content_stamp);
+  const html = revision.frames.get(frame.file);
+  if (!html) throw new NotFoundError(`frame '${frame.file}' is not available in revision '${frame.content_stamp}'`);
+
+  // The design-frames contract exposes component anchors as data-testhook or
+  // data-testid attributes. Limiting discussion anchors to these selectors (or
+  // `body` for frame-level feedback) keeps them portable across versions and
+  // makes validation possible without executing arbitrary selector engines.
+  if (selector === 'body') return;
+  const match = /^\[data-(?:testhook|testid)=(?:"([^"]+)"|'([^']+)'|([^\]]+))\]$/.exec(selector);
+  const value = match?.[1] ?? match?.[2] ?? match?.[3];
+  if (!value) {
+    throw new ValidationError('targetSelector must be body, [data-testhook=<value>], or [data-testid=<value>]');
+  }
+  const attr = selector.startsWith('[data-testhook=') ? 'data-testhook' : 'data-testid';
+  const attribute = new RegExp(`\\b${attr}\\s*=\\s*(["'])${escapeRegExp(value)}\\1|\\b${attr}\\s*=\\s*${escapeRegExp(value)}(?=\\s|>|/)`, 'i');
+  if (!attribute.test(html)) {
+    throw new ValidationError(`targetSelector '${selector}' does not exist in revision '${frame.content_stamp}'`);
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 async function targetExists(targetType: DiscussionTargetType, uuid: string, reqLog: ReturnType<typeof log>): Promise<boolean> {
   const table =
@@ -168,7 +193,7 @@ discussionsRouter.post('/:id/comments', async (req, res) => {
   }
   if (errors.length) throw new ValidationError('invalid comment create body', errors);
 
-  const { authorRef, authorType } = resolveActor(body);
+  const { authorRef, authorType } = resolveActor(req);
   const row = await commentRepo.insertComment(
     {
       discussionId: discussion.id,

@@ -33,6 +33,8 @@ servers:
   - url: http://localhost:4400
 security:
   - bearerAuth: []
+    delegatedUser: []
+  - bearerAuth: []
   - {}
 paths:
   /health:
@@ -140,6 +142,50 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/features/{slug}/import:
+    post:
+      summary: Atomically publish a complete repository frame set and immutable revision
+      description: >
+        Replaces the entire current manifest and frame set in one publication,
+        removing files absent from the request. expectedStamp is optional for an
+        unconditional publish, null for create-only, or the observed current
+        content stamp for compare-and-swap. A mismatch returns 409. Successful
+        retries reuse the same immutable revision and repair missing frame indexes.
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest, frames]
+              properties:
+                manifest: { $ref: '#/components/schemas/Manifest' }
+                frames:
+                  type: object
+                  description: Complete flat HTML filename-to-content map; entry and all declared frames are required.
+                  additionalProperties: { type: string }
+                expectedStamp:
+                  type: string
+                  nullable: true
+                  pattern: '^[0-9a-f]{64}$'
+      responses:
+        '200':
+          description: Complete imported revision published
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, stamp, frameCount, revision]
+                properties:
+                  slug: { type: string }
+                  stamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  frameCount: { type: integer, minimum: 0 }
+                  revision: { $ref: '#/components/schemas/ContentRevision' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/StampConflict' }
+
   /api/v1/features/{slug}/stamp:
     get:
       summary: Compute the current content stamp and compare to the persisted one (no write)
@@ -158,11 +204,95 @@ paths:
                   manifestStamp: { type: string, nullable: true }
                   current: { type: boolean }
     post:
-      summary: Compute AND persist the stamp onto the manifest
+      summary: Atomically compute, snapshot, and persist the exact current content stamp
       parameters: [{ $ref: '#/components/parameters/Slug' }]
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/revisions:
+    get:
+      summary: List immutable content revisions for a feature
+      description: >
+        Each item represents the exact frame bytes committed under a unique
+        content stamp. Revisions are created by full imports, review decisions,
+        or POSTing the feature stamp and
+        are never updated in place.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/Slug' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, revisions]
+                properties:
+                  slug: { type: string }
+                  revisions:
+                    type: array
+                    items: { $ref: '#/components/schemas/ContentRevision' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/revisions/{stamp}:
+    get:
+      summary: Retrieve the exact manifest and frame bytes for an immutable revision
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: stamp
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, stamp, revision, manifest, frames]
+                properties:
+                  slug: { type: string }
+                  stamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  revision: { $ref: '#/components/schemas/ContentRevision' }
+                  manifest: { $ref: '#/components/schemas/Manifest' }
+                  frames:
+                    type: object
+                    additionalProperties: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/features/{slug}/revisions/{stamp}/frame-refs:
+    get:
+      summary: Resolve frame identities within one immutable revision
+      description: >
+        Returns only frame references indexed for the supplied content stamp.
+        Use the returned frame id as targetRef for frame or element discussions;
+        this prevents annotations from being attached to a newer frame with the
+        same file name.
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - name: stamp
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slug, stamp, frames]
+                properties:
+                  slug: { type: string }
+                  stamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  frames:
+                    type: array
+                    items: { $ref: '#/components/schemas/RevisionFrameRef' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/features/{slug}/frames/{file}:
@@ -207,7 +337,8 @@ paths:
       description: >
         Appends an `approve` decision to the flow's append-only approval log
         (never mutates an existing row). Backward-compatible: an old caller
-        sending only `{ approvedBy }` still works. If `contentStamp` is
+        sending only `{ approvedBy }` still works and binds the decision to the
+        current content stamp under the write guard. If `contentStamp` is
         supplied it binds the decision to the exact frames the reviewer saw
         (must equal the feature's current stamp, else 409). The response echoes
         the created approval (fxdf_apr_*) and the stamp it was bound to.
@@ -226,17 +357,16 @@ paths:
               additionalProperties: false
               required: [approvedBy]
               properties:
-                approvedBy: { type: string, description: 'Actor reference (email/subject). Paired with actorType server-side.' }
+                approvedBy: { type: string, description: 'Legacy compatibility field. Persisted actor is always the verified delegated user or machine subject.' }
                 actorType:
                   type: string
                   nullable: true
                   enum: [user, agent]
-                  description: 'OPTIONAL type discriminator for approvedBy (identifier-standard §2). Defaults to user when omitted.'
+                  description: 'Legacy compatibility field. Server derives user for delegated users and agent for machines.'
                 contentStamp:
                   type: string
-                  nullable: true
                   pattern: '^[0-9a-f]{64}$'
-                  description: 'OPTIONAL sha256 content stamp the reviewer saw; bound onto the decision. Mismatch with the current stamp → 409.'
+                  description: 'Sha256 stamp the reviewer saw. Omission binds to current content; null or malformed values fail validation. Mismatch with current content returns 409.'
       responses:
         '200':
           description: Approve decision recorded
@@ -255,7 +385,8 @@ paths:
         Appends a `reject` decision (with a required `reason`) to the flow's
         append-only approval log. Reject re-dispatches product-designer for an
         improving iteration; it does not delete prior rows. The response echoes
-        the created approval (fxdf_apr_*) and any bound stamp.
+        the created approval (fxdf_apr_*) and its bound stamp. Omission of
+        contentStamp binds to current content under the write guard.
       parameters:
         - { $ref: '#/components/parameters/Slug' }
         - name: flowId
@@ -272,17 +403,16 @@ paths:
               required: [reason]
               properties:
                 reason: { type: string, minLength: 1, description: 'Why the flow was rejected. REQUIRED as of v0.2.0 — an append-only decision log row must carry its rationale.' }
-                rejectedBy: { type: string, nullable: true, description: 'Actor reference (email/subject). Paired with actorType.' }
+                rejectedBy: { type: string, nullable: true, description: 'Legacy compatibility field. Persisted actor is always the verified delegated user or machine subject.' }
                 actorType:
                   type: string
                   nullable: true
                   enum: [user, agent]
-                  description: 'OPTIONAL type discriminator for rejectedBy (identifier-standard §2). Defaults to user when omitted.'
+                  description: 'Legacy compatibility field. Server derives user for delegated users and agent for machines.'
                 contentStamp:
                   type: string
-                  nullable: true
                   pattern: '^[0-9a-f]{64}$'
-                  description: 'OPTIONAL sha256 content stamp the reviewer saw; bound onto the decision.'
+                  description: 'Sha256 stamp the reviewer saw; omission binds to current content. Null and malformed values fail validation; stale stamps return 409.'
       responses:
         '200':
           description: Reject decision recorded
@@ -408,6 +538,95 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/FeatureSummary' }
                   page: { $ref: '#/components/schemas/PageInfo' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/workspace:
+    get:
+      summary: Get an app workspace with manifest-backed counts and its latest design system
+      security: []
+      parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectWorkspace' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/design-system:
+    get:
+      summary: Get the latest immutable design-system revision
+      security: []
+      parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignSystemRevision' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/design-system/revisions:
+    parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+    get:
+      summary: List design-system revisions in ascending revision order
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/DesignSystemRevision' } }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Append a design-system snapshot with an optimistic predecessor check
+      description: >
+        expectedRevision must equal the current latest revision (0 initially).
+        Component decisions and token edits create a new snapshot; old snapshots
+        remain readable. createdBy is taken from the verified caller.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DesignSystemRevisionCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignSystemRevision' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: expectedRevision differs from the current latest revision }
+
+  /api/v1/projects/{id}/design-system/revisions/{revision}:
+    get:
+      summary: Read a historical design-system snapshot
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - name: revision
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 2147483647 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignSystemRevision' }
+        '400': { $ref: '#/components/responses/Validation' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/discussions:
@@ -568,12 +787,27 @@ paths:
 
 components:
   securitySchemes:
+    delegatedUser:
+      type: apiKey
+      in: header
+      name: X-Fuze-Delegation
+      description: >
+        Server-to-server header with value Bearer <delegation-token>. FuzeFront's
+        same-origin proxy exchanges the browser session for a fuze-delegation
+        token with audience service:fuzex. Authorization must contain its
+        immediate actor's fuze-workload token. Both are introspected; actor.sub
+        must match the workload subject and tenant-bound workloads must match
+        the delegated tenant. Delegation requires fuzex:frames:read for reads
+        and fuzex:frames:write for mutations. Invalid supplied delegation never
+        falls back to anonymous reads or direct machine writes. Browsers never
+        receive either upstream credential.
     bearerAuth:
       type: http
       scheme: bearer
       description: >
-        A FuzeFront-issued MACHINE token (OAuth2 client-credentials), required
-        for all write operations (POST/PUT/DELETE). Reads are public.
+        A FuzeFront-issued MACHINE token for direct service writes, or the
+        fuze-workload token accompanying delegatedUser for hosted user calls.
+        Reads without delegation are public. All write methods require auth.
 
         Obtain one from FuzeFront's `POST /api/v1/security/tokens`. This service
         verifies it per request against FuzeFront's
@@ -642,6 +876,25 @@ components:
               expectedStamp: { type: string, pattern: '^[0-9a-f]{64}$' }
               suppliedStamp: { type: string, pattern: '^[0-9a-f]{64}$' }
   schemas:
+    RevisionFrameRef:
+      type: object
+      required: [id, file, contentStamp]
+      properties:
+        id: { $ref: '#/components/schemas/FrameRefId' }
+        file: { type: string }
+        flowId:
+          allOf: [{ $ref: '#/components/schemas/FlowId' }]
+          nullable: true
+        contentStamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+    ContentRevision:
+      type: object
+      required: [stamp, createdAt]
+      properties:
+        stamp: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { type: string, format: date-time }
+        sourceRepo: { type: string, nullable: true }
+        sourceStamp: { type: string, nullable: true, pattern: '^[0-9a-f]{64}$', description: Original repository tree stamp before hosted transformations. }
+        importerVersion: { type: string, nullable: true }
     FeatureSummary:
       type: object
       properties:
@@ -668,6 +921,8 @@ components:
         designSystem: { type: string }
         entry: { type: string }
         sourceRepo: { type: string, nullable: true }
+        sourceStamp: { type: string, pattern: '^[0-9a-f]{64}$', description: Original repository tree stamp before CSS embedding and provenance fields. }
+        importerVersion: { type: string }
         stamp: { type: string, nullable: true }
         frames:
           type: array
@@ -719,6 +974,10 @@ components:
       pattern: '^fxdf_prj_[0-9a-hjkmnp-tv-z]+$'
       description: 'Project TypeID, e.g. fxdf_prj_01h455vb4pex5vsknk084sn02q.'
       example: fxdf_prj_01h455vb4pex5vsknk084sn02q
+    FlowId:
+      type: string
+      pattern: '^fxdf_flw_[0-9a-hjkmnp-tv-z]+$'
+      example: fxdf_flw_01h455vb4pex5vsknk084sn02q
     ApprovalId:
       type: string
       pattern: '^fxdf_apr_[0-9a-hjkmnp-tv-z]+$'
@@ -785,6 +1044,55 @@ components:
         description: { type: string, nullable: true }
         sourceRepo: { type: string, nullable: true }
 
+    ProjectWorkspace:
+      type: object
+      required: [project, featureCount, flowCount, frameCount, designSystem]
+      properties:
+        project: { $ref: '#/components/schemas/Project' }
+        featureCount: { type: integer, minimum: 0 }
+        flowCount: { type: integer, minimum: 0 }
+        frameCount: { type: integer, minimum: 0 }
+        designSystem:
+          allOf: [{ $ref: '#/components/schemas/DesignSystemRevision' }]
+          nullable: true
+
+    DesignSystemComponent:
+      type: object
+      additionalProperties: false
+      required: [key, name]
+      properties:
+        key: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$' }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        selector: { type: string }
+        usage: { type: string }
+        status: { type: string, enum: [draft, approved, rejected] }
+        reason: { type: string, description: Required and non-empty when status is rejected }
+
+    DesignSystemRevisionCreate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, name, tokens, components]
+      properties:
+        expectedRevision: { type: integer, minimum: 0, maximum: 2147483646 }
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        tokens: { type: object, additionalProperties: true }
+        components: { type: array, items: { $ref: '#/components/schemas/DesignSystemComponent' } }
+
+    DesignSystemRevision:
+      type: object
+      required: [projectId, revision, name, description, tokens, components, createdBy, createdAt]
+      properties:
+        projectId: { $ref: '#/components/schemas/ProjectId' }
+        revision: { type: integer, minimum: 1 }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        tokens: { type: object, additionalProperties: true }
+        components: { type: array, items: { $ref: '#/components/schemas/DesignSystemComponent' } }
+        createdBy: { type: string, description: Verified caller subject }
+        createdAt: { type: string, format: date-time }
+
     Approval:
       type: object
       description: >
@@ -800,7 +1108,7 @@ components:
           type: string
           enum: [approve, reject]
           description: 'Discriminator for the approve/reject union.'
-        actorRef: { type: string, description: 'Who decided (approvedBy/rejectedBy).' }
+        actorRef: { type: string, description: 'Verified delegated user subject or machine subject; never a client-supplied identity.' }
         actorType:
           type: string
           enum: [user, agent]
@@ -809,7 +1117,7 @@ components:
           type: string
           nullable: true
           pattern: '^[0-9a-f]{64}$'
-          description: 'The sha256 stamp this decision was bound to, when supplied.'
+          description: 'The sha256 stamp this decision was bound to. New hosted decisions always bind a stamp; null may occur in legacy imported history.'
         reason:
           type: string
           nullable: true
@@ -865,7 +1173,10 @@ components:
         targetSelector:
           type: string
           nullable: true
-          description: 'Required when targetType=element (a data-* testHook selector); otherwise omit.'
+          description: >
+            Required when targetType=element. Must be `body`,
+            `[data-testhook=<value>]`, or `[data-testid=<value>]` and resolve
+            against the exact frame revision; otherwise omit.
         title: { type: string, nullable: true }
 
     Comment:
@@ -901,4 +1212,4 @@ components:
           type: string
           nullable: true
           enum: [user, agent]
-          description: 'Optional type discriminator for the author; defaults to user.'
+          description: 'Legacy compatibility field. Server derives user for delegated users and agent for machines.'

@@ -2,7 +2,8 @@
 
 Server-owned entity identifiers for FuzeX's own product-local entity types
 (currently: `design-frames-service`'s `project`/`feature`/`flow`/`frameRef`/
-`approval`/`discussion`/`comment`). Policy:
+`approval`/`discussion`/`comment`/`generation`). `generation` uses `fxdf_gen`
+for durable structured UX-flow drafts and their publication lifecycle. Policy:
 [`governance/identifier-standard.md`](https://github.com/izzywdev/FuzeFront/blob/master/governance/identifier-standard.md)
 (FuzeSDLC baseline §4.2).
 

@@ -1,148 +1,68 @@
 'use strict';
 
-/**
- * 07-frame-refs-gap.test.cjs — documents a real functional gap: openapi.yaml
- * (DiscussionTargetType enum: project|feature|flow|frame|element) and
- * docs/postgres-tier.md ("discussions + threaded comments anchored to any
- * node of the design graph ... including element-level anchors") both
- * promise discussions can target a `frame` (fxdf_frm_*) or `element`
- * (a frame + a data-* testHook selector). But no LIVE route ever mints a
- * frame_ref row — repositories/frameRefRepo.ts#upsertFrameRef is called
- * ONLY from scripts/backfill.ts, never from PUT /api/v1/features/:slug/
- * frames/:file or any other request handler (grep confirms this — see PR
- * body). A client of the running API therefore has no way to discover a
- * valid `fxdf_frm_*` id and can never legitimately open a frame/element
- * discussion without an operator manually running the backfill script
- * out-of-band.
- *
- * This file proves BOTH halves precisely: (1) discussions ARE reachable
- * for frame/element targets once a frame_ref row exists (isolating the gap
- * to "nothing creates the row", not "the discussion feature is broken"),
- * and (2) that no live route creates one. (1) talks HTTP-only; (2)
- * necessarily looks past the HTTP boundary at Postgres directly, since the
- * defect IS the absence of an API-observable capability — there is no
- * endpoint to assert 404 against; the row itself never exists.
- */
-
+// Revision refs are discoverable over HTTP and retain their original frame and
+// component identity when a later import replaces the active content.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const path = require('node:path');
 const { bootServer, requireDatabase } = require('../lib/server.cjs');
 const { client } = require('../lib/http.cjs');
-const { withClient } = require('../lib/db.cjs');
-// Reuse the SAME identity codec the backend uses (this repo's own
-// @fuzex/identity, ../../../packages/identity) so the wire id this test
-// constructs is byte-for-byte what the running server would itself mint.
-const { fromUuid } = require(path.join(__dirname, '..', '..', '..', '..', 'packages', 'identity', 'dist', 'index.js'));
 
-let srv;
-let http;
-let databaseUrl;
-
-try {
-  databaseUrl = requireDatabase();
-} catch (err) {
-  console.warn(`07-frame-refs-gap.test.cjs: ${err.message} — skipping.`);
-  test('skipped: no DATABASE_URL', { skip: true }, () => {});
-  module.exports = undefined;
+try { requireDatabase(); } catch {
+  test('frame revision acceptance requires DATABASE_URL', { skip: true }, () => {});
   return;
 }
 
-test.before(async () => {
-  srv = await bootServer();
-  http = client(srv.baseUrl, srv.token);
-  // bootServer() now provisions a private, per-file ephemeral database (see
-  // lib/server.cjs) instead of truncating the shared one — direct SQL below
-  // must target THAT database, not the base DATABASE_URL captured above.
-  databaseUrl = srv.databaseUrl;
-});
+let srv;
+let http;
+test.before(async () => { srv = await bootServer(); http = client(srv.baseUrl, srv.token); });
+test.after(async () => { await srv.close(); });
 
-test.after(async () => {
-  await srv.close();
-});
-
-function uniqueSlug(prefix) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function manifest(slug, hook = 'reveal-token') {
+  return { name: slug, description: 'fixture', designSystem: 'fuse-seam', entry: 'index.html',
+    frames: [{ id: 'index', file: 'index.html', label: 'Primary', summary: 'Primary action', testHooks: [hook], flow: 'primary' }],
+    build: { flows: [{ id: 'primary', orchestrator: 'Orchestrator.tsx', route: '/primary' }] } };
 }
 
-test('discussions on a `frame` target DO work once a frame_ref row exists (isolates the gap to row creation, not the feature)', async () => {
-  const slug = uniqueSlug('frame-ref-feature');
-  const create = await http.post('/api/v1/features', { body: { slug, description: 'fixture' } });
-  assert.equal(create.status, 201);
+test('import exposes real revision frame refs and historical selectors stay bound to their original snapshot', async () => {
+  const slug = `revision-annotations-${Date.now().toString(36)}`;
+  const first = await http.post(`/api/v1/features/${slug}/import`, { body: {
+    manifest: manifest(slug), frames: { 'index.html': '<html><body><button data-testhook="reveal-token">Reveal</button></body></html>' }, expectedStamp: null,
+  } });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  const refs = await http.get(`/api/v1/features/${slug}/revisions/${first.body.stamp}/frame-refs`);
+  assert.equal(refs.status, 200);
+  assert.equal(refs.body.frames.length, 1);
+  const ref = refs.body.frames[0];
+  assert.match(ref.id, /^fxdf_frm_[0-9a-hjkmnp-tv-z]+$/);
+  assert.equal(ref.contentStamp, first.body.stamp);
+  assert.equal((await http.post('/api/v1/discussions', { body: { targetType: 'frame', targetRef: ref.id } })).status, 201);
 
-  // Seed the missing row directly — standing in for what a (currently
-  // nonexistent) live route would do on PUT .../frames/:file.
-  const featureId = await withClient(databaseUrl, async (db) => {
-    const { rows } = await db.query('select id from design_frames.feature where slug = $1', [slug]);
-    return rows[0].id;
-  });
-  const frameRefUuid = crypto.randomUUID();
-  await withClient(databaseUrl, (db) =>
-    db.query(
-      `insert into design_frames.frame_ref (id, feature_id, file, content_stamp) values ($1, $2, $3, $4)`,
-      [frameRefUuid, featureId, '01-index.html', 'a'.repeat(64)]
-    )
-  );
-  const frameRefWireId = fromUuid('frameRef', frameRefUuid);
-  assert.match(frameRefWireId, /^fxdf_frm_[0-9a-hjkmnp-tv-z]+$/);
-
-  const disc = await http.post('/api/v1/discussions', {
-    body: { targetType: 'frame', targetRef: frameRefWireId, title: 'copy nit on this frame' },
-  });
-  assert.equal(disc.status, 201, 'the discussion feature itself works fine once the row exists');
-  assert.equal(disc.body.targetType, 'frame');
-  assert.equal(disc.body.targetRef, frameRefWireId);
-
-  const elementDisc = await http.post('/api/v1/discussions', {
-    body: {
-      targetType: 'element',
-      targetRef: frameRefWireId,
-      targetSelector: '[data-testhook=reveal-token]',
-    },
-  });
-  assert.equal(elementDisc.status, 201, 'element-level anchoring also works once the row exists');
+  const second = await http.post(`/api/v1/features/${slug}/import`, { body: {
+    manifest: manifest(slug, 'new-action'), frames: { 'index.html': '<html><body><button data-testhook="new-action">New</button></body></html>' }, expectedStamp: first.body.stamp,
+  } });
+  assert.equal(second.status, 200);
+  assert.notEqual(second.body.stamp, first.body.stamp);
+  const annotation = await http.post('/api/v1/discussions', { body: {
+    targetType: 'element', targetRef: ref.id, targetSelector: '[data-testhook=reveal-token]',
+  } });
+  assert.equal(annotation.status, 201, 'historical annotation resolves against historical HTML after replacement');
+  const missing = await http.post('/api/v1/discussions', { body: {
+    targetType: 'element', targetRef: ref.id, targetSelector: '[data-testhook=new-action]',
+  } });
+  assert.equal(missing.status, 400, 'a component in the new revision is absent from the old revision');
+  const historical = await http.get(`/api/v1/features/${slug}/revisions/${first.body.stamp}`);
+  assert.match(historical.body.frames['index.html'], /reveal-token/);
+  assert.doesNotMatch(historical.body.frames['index.html'], /new-action/);
 });
 
-test(
-  'GAP: PUT .../frames/:file does NOT create a frame_ref row, so no client of the running API ' +
-    'can ever discover a valid frame/element discussion target',
-  async () => {
-    const slug = uniqueSlug('no-frame-ref-feature');
-    await http.post('/api/v1/features', { body: { slug, description: 'fixture' } });
-
-    await http.put(`/api/v1/features/${slug}/frames/01-index.html`, {
-      body: { html: '<html><body>content</body></html>' },
-    });
-    // Persist the stamp too — the strongest case for the row existing, since
-    // frame_ref.content_stamp is meant to bind a ref to a specific stamped
-    // version of the frame (db/migrations/0006_create_frame_ref.sql).
-    await http.post(`/api/v1/features/${slug}/stamp`, {});
-
-    const featureId = await withClient(databaseUrl, async (db) => {
-      const { rows } = await db.query('select id from design_frames.feature where slug = $1', [slug]);
-      return rows[0].id;
-    });
-    const frameRefCount = await withClient(databaseUrl, async (db) => {
-      const { rows } = await db.query('select count(*)::int as n from design_frames.frame_ref where feature_id = $1', [
-        featureId,
-      ]);
-      return rows[0].n;
-    });
-
-    // EXPECTED (per docs/postgres-tier.md's stated goal — discussions
-    // anchored to "any node of the design graph ... including
-    // element-level anchors"): writing + stamping a frame indexes at least
-    // one frame_ref row, so a client could subsequently discover it (e.g.
-    // via a future GET .../features/:slug/frames listing refs) and open a
-    // frame/element discussion against it.
-    // ACTUAL: 0 rows — frameRefRepo.upsertFrameRef is only ever called from
-    // scripts/backfill.ts, never from any request handler.
-    assert.ok(
-      frameRefCount > 0,
-      `DEFECT: PUT/POST frame+stamp created 0 frame_ref rows for feature '${slug}' — ` +
-        'frame/element discussion targets are unreachable via the live API without running ' +
-        'the out-of-band backfill script (see repositories/frameRefRepo.ts callers).'
-    );
-  }
-);
+test('legacy frame write and stamp expose revision references through the running API', async () => {
+  const slug = `legacy-frame-refs-${Date.now().toString(36)}`;
+  assert.equal((await http.post('/api/v1/features', { body: { slug } })).status, 201);
+  assert.equal((await http.put(`/api/v1/features/${slug}/frames/index.html`, { body: { html: '<html><body>content</body></html>' } })).status, 200);
+  const stamped = await http.post(`/api/v1/features/${slug}/stamp`, {});
+  assert.equal(stamped.status, 200);
+  const refs = await http.get(`/api/v1/features/${slug}/revisions/${stamped.body.stamp}/frame-refs`);
+  assert.equal(refs.status, 200);
+  assert.equal(refs.body.frames.length, 1);
+  assert.equal(refs.body.frames[0].file, 'index.html');
+});

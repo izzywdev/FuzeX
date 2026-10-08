@@ -19,7 +19,7 @@
 
 const { createHash } = require('node:crypto');
 
-const APPROVAL_KEYS = new Set(['approved', 'approvedBy', 'approvedAt']);
+const APPROVAL_KEYS = new Set(['approved', 'approvedBy', 'approvedAt', 'rejectionReason']);
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);

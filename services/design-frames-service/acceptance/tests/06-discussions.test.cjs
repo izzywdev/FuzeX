@@ -246,7 +246,7 @@ test('POST .../comments with an empty body is 400', async () => {
   assert.equal(status, 400);
 });
 
-test('POST .../comments with a parentCommentId belonging to a DIFFERENT discussion is still accepted by shape but should be a semantic error — documents current behaviour', async () => {
+test('POST .../comments rejects a parentCommentId from a different discussion without creating a reply', async () => {
   const project = await seedProject();
   const discA = await http.post('/api/v1/discussions', { body: { targetType: 'project', targetRef: project.id } });
   const discB = await http.post('/api/v1/discussions', { body: { targetType: 'project', targetRef: project.id } });
@@ -255,18 +255,14 @@ test('POST .../comments with a parentCommentId belonging to a DIFFERENT discussi
   const cross = await http.post(`/api/v1/discussions/${discB.body.id}/comments`, {
     body: { body: 'reply in B pointing at A', parentCommentId: parent.body.id },
   });
-  // openapi.yaml documents parentCommentId as "must belong to the same
-  // discussion" — a cross-discussion parent should be rejected. Recorded
-  // here (not asserted as a hard failure) since it is a secondary/softer
-  // requirement than the mandatory identifier checks above; see PR body.
-  if (cross.status === 201) {
-    console.warn(
-      'NOTE: POST .../comments accepted a parentCommentId belonging to a DIFFERENT discussion ' +
-        '(openapi.yaml: "must belong to the same discussion") — see PR body.'
-    );
-  } else {
-    assert.ok([400, 404].includes(cross.status));
-  }
+  assert.equal(cross.status, 400);
+  const unchanged = await http.get(`/api/v1/discussions/${discB.body.id}`);
+  assert.deepEqual(unchanged.body.comments, []);
+  const valid = await http.post(`/api/v1/discussions/${discA.body.id}/comments`, {
+    body: { body: 'reply in A', parentCommentId: parent.body.id },
+  });
+  assert.equal(valid.status, 201);
+  assert.equal(valid.body.parentCommentId, parent.body.id);
 });
 
 test('POST .../comments on a nonexistent discussion is 404', async () => {

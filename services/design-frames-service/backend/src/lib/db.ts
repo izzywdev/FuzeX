@@ -17,7 +17,8 @@ export function getPool(): Pool {
       'DATABASE_URL is not set — see .env.example. FuzeInfra provisions this via a SealedSecret in every real environment; this repo never creates the database itself.'
     );
   }
-  pool = new Pool({ connectionString });
+  // Bound pool acquisition so a broken database route cannot accumulate waits.
+  pool = new Pool({ connectionString, connectionTimeoutMillis: 2000 });
   return pool;
 }
 

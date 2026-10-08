@@ -85,6 +85,35 @@ tests/                  — .test.cjs against the BUILT dist/ (mirrors the repo'
 
 ## Identity
 
+### Hosted browser authentication
+
+The browser sends its ordinary FuzeFront user session to the same-origin
+FuzeFront proxy. Only that server supplies the upstream credentials:
+
+```http
+Authorization: Bearer <FuzeFront fuze-workload token>
+X-Fuze-Delegation: Bearer <FuzeFront fuze-delegation token>
+```
+
+Both credentials are introspected through FuzeFront Security. The workload
+must have `tokenKind=fuze-workload`; the delegation must have
+`tokenKind=fuze-delegation`, audience `service:fuzex`, and `actor.sub` matching
+the workload subject. A tenant-bound workload must match the delegated tenant.
+The delegation requires `fuzex:frames:read` for reads and
+`DESIGN_FRAMES_REQUIRED_SCOPE` (default `fuzex:frames:write`) for mutations.
+Malformed, inactive, mismatched or unverifiable credentials fail closed.
+
+Existing anonymous reads remain available. Supplying a delegation makes its
+validation mandatory even for a read; it never falls back to anonymous access.
+CLI/service writes may continue to use their verified machine bearer with the
+write scope. A delegation token by itself is not a machine credential.
+
+Approvals, comments, design-system revisions and generation drafts attribute
+their actor to the verified delegated user (`user`) or machine (`agent`).
+Legacy `approvedBy`, `rejectedBy`, `actorType`, and `authorType` inputs remain
+accepted by their existing request schemas, but cannot override this identity.
+Neither a machine token nor a delegation token belongs in browser storage.
+
 Mints `fxdf_prj_*` / `fxdf_ftr_*` / `fxdf_flw_*` / `fxdf_frm_*` / `fxdf_apr_*`
 / `fxdf_dsc_*` / `fxdf_cmt_*` ids via `@fuzex/identity`
 (`../../../packages/identity`) — this repo's OWN identity registry, not
@@ -93,3 +122,51 @@ Mints `fxdf_prj_*` / `fxdf_ftr_*` / `fxdf_flw_*` / `fxdf_frm_*` / `fxdf_apr_*`
 cannot be extended from a consuming repo, and per
 `governance/identifier-standard.md` §2 that is correct — each repo keeps its
 own registry).
+
+## App workspaces and design systems
+
+An existing project is an application workspace. `GET /api/v1/projects/{id}/workspace`
+returns its project metadata, feature/flow/frame counts from the authoritative
+manifests, and the latest design-system snapshot (or `null` initially). Existing
+`/projects` CRUD and `/projects/{id}/features` pagination remain available.
+
+Design systems are complete, immutable snapshots of nested token metadata and
+component definitions. Append a snapshot with
+`POST /api/v1/projects/{id}/design-system/revisions`:
+
+```json
+{
+  "expectedRevision": 0,
+  "name": "App foundations",
+  "tokens": { "color": { "accent": { "$type": "color", "$value": "#0066ff" } } },
+  "components": [
+    { "key": "button.primary", "name": "Primary button", "status": "draft" }
+  ]
+}
+```
+
+The verified caller supplies the persisted `createdBy` audit subject. Never send
+`id`, `projectId`, `revision`, `createdBy`, or `createdAt` in the body. Set
+`expectedRevision` to the current latest revision for later snapshots; concurrent
+or stale writers get `409`. A project-row lock serializes initial and subsequent
+writers. Revision numbers belong to their project; `{projectId, revision}` is the
+complete reference. Database triggers reject update/delete of old snapshots.
+
+Component `status` is `draft`, `approved`, or `rejected`; rejected components
+require a non-empty `reason`. Changing tokens, components, or decisions appends a
+new complete snapshot. `GET /projects/{id}/design-system` reads the latest;
+`GET /projects/{id}/design-system/revisions/{revision}` reads history, and
+`GET /projects/{id}/design-system/revisions?limit=50&cursor=...` paginates history
+in ascending revision order. Follow `page.nextCursor` until `hasMore` is false.
+
+Flow-generation/import integrations should pin `designSystemProjectId` and
+`designSystemRevision` together in revision provenance and read that exact
+snapshot; resolving the latest at preview time would change what an older flow
+was designed against. If a pinned revision is unavailable, reject generation
+instead of silently selecting a newer revision.
+
+Apply migration `0010_create_design_system_revision.sql` before deploying this
+API. `tests/design-system.test.cjs` validates snapshot bodies without Postgres;
+`tests/design-system-integration.test.cjs` exercises persistence, stale/concurrent
+writes, project isolation, historical reads, authentication, and database
+immutability using an isolated scratch database when `DATABASE_URL` is supplied.
