@@ -26,8 +26,14 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "fuzex.labels" . | nindent 4 }}
+  {{- if .Values.postgresTier.enabled }}
+  annotations:
+    # Argo prune is disabled to retain data. Explicitly scale down the previous
+    # writer before the hosted tier mounts the RWO volume in the next wave.
+    argocd.argoproj.io/sync-wave: "0"
+  {{- end }}
 spec:
-  replicas: 1
+  replicas: {{ if .Values.postgresTier.enabled }}0{{ else }}1{{ end }}
   strategy:
     type: Recreate
   selector:

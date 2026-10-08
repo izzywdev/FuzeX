@@ -48,7 +48,7 @@ function activeToken(token, { subject = 'svc-test', tenantId = null, scope = SCO
   return token;
 }
 
-const { requireAuthForWrites, __testables } = require('../dist/middleware/auth.js');
+const { requireAuthForWrites, authenticatedActor, __testables } = require('../dist/middleware/auth.js');
 
 function fakeReq(method, headers = {}) {
   return { method, headers };
@@ -236,4 +236,75 @@ test('extractBearer parses the "Bearer <token>" header shape only', () => {
   assert.equal(__testables.extractBearer({ headers: { authorization: 'Bearer abc' } }), 'abc');
   assert.equal(__testables.extractBearer({ headers: { authorization: 'Basic abc' } }), null);
   assert.equal(__testables.extractBearer({ headers: {} }), null);
+  assert.equal(__testables.extractBearer({ headers: { authorization: ['Bearer abc'] } }), null);
+  assert.equal(__testables.extractBearer({ headers: { authorization: 'Bearer abc, Bearer def' } }), null);
+});
+
+function delegatedRequest(method = 'POST', override = {}, workloadOverride = {}) {
+  responses.set('workload', jsonResponse(200, {
+    active: true, subject: 'svc-fuzefront', tokenKind: 'fuze-workload', tenantId: 'tenant-a',
+    ...workloadOverride,
+  }));
+  responses.set('delegation', jsonResponse(200, {
+    active: true, subject: 'user-alice', tokenKind: 'fuze-delegation',
+    audience: 'service:fuzex', actor: { sub: 'svc-fuzefront' }, tenantId: 'tenant-a',
+    scope: 'fuzex:frames:read fuzex:frames:write', ...override,
+  }));
+  return fakeReq(method, { authorization: 'Bearer workload', 'x-fuze-delegation': 'Bearer delegation' });
+}
+
+test('hosted delegated request binds the verified service and user audit actor', async () => {
+  const req = delegatedRequest();
+  assert.equal(await run(req), undefined);
+  assert.equal(req.machineIdentity.subject, 'svc-fuzefront');
+  assert.equal(req.delegatedIdentity.subject, 'user-alice');
+  assert.deepEqual(authenticatedActor(req), { actorRef: 'user-alice', actorType: 'user' });
+});
+
+for (const [label, override] of [
+  ['wrong audience', { audience: 'service:fuzekeys' }],
+  ['wrong actor', { actor: { sub: 'other-service' } }],
+  ['missing actor', { actor: undefined }],
+  ['wrong token kind', { tokenKind: 'fuze-workload' }],
+  ['wrong tenant', { tenantId: 'tenant-b' }],
+  ['missing scope', { scope: 'fuzex:frames:read' }],
+]) {
+  test(`delegation rejects ${label}`, async () => {
+    assert.equal((await run(delegatedRequest('POST', override))).code, 'FORBIDDEN');
+  });
+}
+
+test('delegation requires a workload immediate caller', async () => {
+  assert.equal((await run(delegatedRequest('POST', {}, { tokenKind: 'fuze-delegation' }))).code, 'FORBIDDEN');
+});
+
+test('delegated reads require the read scope and verify both tokens', async () => {
+  assert.equal(await run(delegatedRequest('GET', { scope: 'fuzex:frames:read' })), undefined);
+  assert.equal((await run(delegatedRequest('GET', { scope: SCOPE }))).code, 'FORBIDDEN');
+  const req = delegatedRequest('GET');
+  responses.set('delegation', jsonResponse(200, { active: false }));
+  assert.equal((await run(req)).code, 'UNAUTHORIZED');
+});
+
+test('malformed delegation is never downgraded to anonymous or direct-machine auth', async () => {
+  for (const method of ['GET', 'POST']) {
+    const req = delegatedRequest(method);
+    req.headers['x-fuze-delegation'] = '';
+    assert.equal((await run(req)).code, 'UNAUTHORIZED');
+    delete req.headers.authorization;
+    req.headers['x-fuze-delegation'] = 'Bearer delegation';
+    assert.equal((await run(req)).code, 'UNAUTHORIZED');
+  }
+});
+
+test('a delegation bearer alone cannot impersonate a direct machine', async () => {
+  delegatedRequest();
+  assert.equal((await run(fakeReq('POST', { authorization: 'Bearer delegation' }))).code, 'FORBIDDEN');
+});
+
+test('direct machine audit actor is derived from verified identity', async () => {
+  const req = fakeReq('POST', { authorization: `Bearer ${activeToken('audit-machine')}` });
+  assert.equal(await run(req), undefined);
+  assert.deepEqual(authenticatedActor(req), { actorRef: 'svc-test', actorType: 'agent' });
+  assert.throws(() => authenticatedActor(fakeReq('POST')), { code: 'UNAUTHORIZED' });
 });

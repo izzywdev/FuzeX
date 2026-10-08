@@ -54,6 +54,13 @@ test('projectManifest tolerates a manifest with no build block at all', () => {
   assert.deepEqual(projectManifest(manifest, new Map()), manifest);
 });
 
+test('a review decision for an older revision cannot approve changed frames', () => {
+  const manifest = { build: { flows: [{ id: 'primary', approved: true }] } };
+  const latest = new Map([['primary', { decision: 'approve', actorRef: 'alice', decidedAt: 't', contentStamp: 'old' }]]);
+  assert.equal(projectManifest(manifest, latest, 'new').build.flows[0].approved, false);
+  assert.equal(projectManifest(manifest, latest, 'old').build.flows[0].approved, true);
+});
+
 test('projectManifest only overlays the flow the approval belongs to, leaving siblings untouched', () => {
   const manifest = {
     build: {

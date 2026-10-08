@@ -160,6 +160,7 @@ webappMfe:
 # — mirroring the top-level go-live order in values-prod.yaml.
 postgresTier:
   enabled: false
+  logLevel: info
 
   image:
     repository: ghcr.io/izzywdev/fuzex-design-frames-postgres-tier
@@ -201,6 +202,8 @@ postgresTier:
     # design_frames._migrations, and every migration file is independently
     # re-runnable — so a retry after a transient connection failure is safe.
     backoffLimit: 2
+    # Prevent an unreachable database from blocking an Argo sync indefinitely.
+    activeDeadlineSeconds: 300
     resources:
       requests: { cpu: 10m, memory: 32Mi }
       limits: { cpu: 200m, memory: 128Mi }
@@ -230,3 +233,5 @@ federatedMount:
   host: ""
   annotations: {}
   path: /apps/fuzex
+  # Stripped once by Traefik. Generic /api routes belong to the portal.
+  apiPath: /apps/fuzex/api

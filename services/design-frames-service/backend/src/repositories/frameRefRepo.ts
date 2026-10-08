@@ -15,6 +15,10 @@ export interface FrameRefRow {
   created_at: Date;
 }
 
+export interface ResolvedFrameRef extends FrameRefRow {
+  feature_slug: string;
+}
+
 export async function upsertFrameRef(
   featureId: string,
   flowId: string | null,
@@ -41,6 +45,36 @@ export async function listByFeature(featureId: string, log: ReqLogger): Promise<
     log
   );
   return rows;
+}
+
+/** Frame refs are content-stamp scoped. A reviewer must resolve a frame
+ * through this lookup before creating a frame/element discussion, otherwise a
+ * comment could accidentally attach to the same filename in a newer revision. */
+export async function listByFeatureAndStamp(
+  featureId: string,
+  contentStamp: string,
+  log: ReqLogger
+): Promise<FrameRefRow[]> {
+  const { rows } = await query<FrameRefRow>(
+    `select * from design_frames.frame_ref
+     where feature_id = $1 and content_stamp = $2
+     order by file asc`,
+    [featureId, contentStamp],
+    log
+  );
+  return rows;
+}
+
+export async function resolveFrameRef(id: string, log: ReqLogger): Promise<ResolvedFrameRef | null> {
+  const { rows } = await query<ResolvedFrameRef>(
+    `select frame_ref.*, feature.slug as feature_slug
+     from design_frames.frame_ref
+     join design_frames.feature on feature.id = frame_ref.feature_id
+     where frame_ref.id = $1`,
+    [id],
+    log
+  );
+  return rows[0] ?? null;
 }
 
 export interface ManifestFrameForIndexing {

@@ -6,7 +6,7 @@ boundary" and `docs/postgres-tier.md` "Migration path" step 1).
 
 **From:** FuzeX (`izzywdev/FuzeX`) — `services/design-frames-service`'s new
 Postgres lifecycle tier (contract: `services/design-frames-service/docs/postgres-tier.md`
-v0.2.0; migrations: `services/design-frames-service/db/migrations/0001`–`0009`;
+v0.2.0; migrations: every tracked SQL file in `services/design-frames-service/db/migrations/`;
 backend: `services/design-frames-service/backend/`).
 
 ## What this repo has ready, waiting on this request
@@ -70,8 +70,61 @@ backend: `services/design-frames-service/backend/`).
 
 ## Explicitly NOT requested here
 
-- No changes to the existing `fuzex-api-tokens` secret or the vanilla
-  `design-frames-service` frontend/Deployment — unaffected by this request.
+- No replacement pre-shared API tokens; FuzeX writes use FuzeFront-issued
+  identities. The obsolete `fuzex-api-tokens` mechanism is not used.
 - No cluster/node changes, no Argo project/Application changes (this tier
   lives inside the existing single `fuzex` Argo Application — see
   `deploy/argocd/application.yaml`'s "ONE Application per repo" note).
+
+## Additional hosted-workspace requirements (FUZX-6)
+
+The lifecycle tier becomes the sole hosted writer of both lifecycle records and
+immutable content snapshots. Enabling it scales the existing writer to zero in
+sync wave 0 and starts the new writer in wave 1; the same durable Longhorn PVC
+(`fuzex-design-frames-data`, namespace `fuzex`) is retained and mounted at
+`/data/features`. There is no database-only restore: both database records and
+volume bytes are required to reproduce a reviewed revision.
+
+FuzeInfra must establish scheduled database backups and Longhorn volume snapshots,
+retention and monitoring using existing cluster conventions, then rehearse a
+paired restore into an isolated namespace/database. Record snapshot identifiers,
+restored revision hashes and approval/discussion counts. Do not delete or replace
+the existing content PVC during provisioning.
+
+Confirm the installed Traefik exposes `traefik.io/v1alpha1` Middleware resources
+and can use a same-namespace StripPrefix middleware for `/apps/fuzex/api`. FuzeX
+owns that Middleware and Ingress; no generic portal API route is changed. Keep
+the existing `/apps/fuzex/` Module Federation asset route as a pass-through.
+
+## Ready-to-file FuzeInfra work item
+
+**Summary:** Provision durable Postgres and paired content backups for the FuzeX hosted review workspace
+
+**Type:** Story, with database provisioning, secret delivery, backup/restore and
+cluster verification tasks. **Dependency:** blocks FUZX-6 hosted rollout.
+
+**Description:** FuzeX now has a sole-writer hosted API chart, namespaced portal
+API routing, dependency-aware readiness and a bounded Argo migration hook. The
+production lifecycle tier remains intentionally disabled until FuzeInfra provides
+its shared-database and durability prerequisites. Execute this work in FuzeInfra
+through its normal GitOps/provisioning workflow. No FuzeX credentials or raw
+connection strings may be posted to Jira/GitHub.
+
+**Acceptance criteria:**
+
+- Provision the service database and database-scoped role with the privileges
+  described above; reject superuser/CREATEDB/CREATEROLE or access to other apps.
+- Deliver `fuzex-design-frames-db` with key `DATABASE_URL` in namespace `fuzex`
+  through SealedSecrets, reachable by the API and Argo migration Job.
+- Verify the retained `fuzex-design-frames-data` Longhorn claim is bound and can
+  move between eligible workload nodes; no filesystem-only writer remains active
+  after the FuzeX GitOps cutover.
+- Establish database backups and content-volume snapshots with documented
+  retention, capacity alerts and failure notifications.
+- Restore a matched database/content backup into isolation; verify an immutable
+  historical frame hash and its review/discussion history match the backup.
+- Verify Traefik's Middleware CRD and namespaced API prefix routing; `/health`
+  remains live while `/ready` returns 503 during a database/storage outage.
+- Record non-secret verification evidence and the provisioning change/PR link in
+  the work item; notify the FUZX-6 owner so the lifecycle tier can be enabled and
+  the full migration acceptance run completed.

@@ -60,19 +60,20 @@ test('POST .../approve mints an fxdf_apr_* id and matches the Approval schema', 
   assert.equal(status, 200);
   assert.match(body.id, /^fxdf_apr_[0-9a-hjkmnp-tv-z]+$/);
   assert.equal(body.decision, 'approve');
-  assert.equal(body.actorRef, 'reviewer@example.com');
-  assert.equal(body.actorType, 'user');
+  assert.equal(body.actorRef, 'svc-acceptance', 'client-selected reviewer names cannot impersonate the verified actor');
+  assert.equal(body.actorType, 'agent');
   assert.equal(body.reason, null);
   assertMatchesSchema('Approval', body);
 });
 
-test('legacy {approvedBy}-only callers still succeed (backward-compat) with a null contentStamp', async () => {
+test('legacy {approvedBy}-only callers still succeed and bind to the current contentStamp', async () => {
   const { slug, flowId } = await createFeatureWithFlow();
+  const currentStamp = (await http.get(`/api/v1/features/${slug}/stamp`)).body.stamp;
   const { status, body } = await http.post(`/api/v1/features/${slug}/flows/${flowId}/approve`, {
     body: { approvedBy: 'legacy-caller@example.com' },
   });
   assert.equal(status, 200);
-  assert.equal(body.contentStamp, null);
+  assert.equal(body.contentStamp, currentStamp);
 });
 
 test('POST .../approve without approvedBy is 400', async () => {
@@ -136,12 +137,12 @@ test('approve -> reject -> approve on the same flow APPENDS 3 rows (never overwr
   const ids = history.body.items.map((i) => i.id);
   assert.equal(new Set(ids).size, 3, 'all three rows must have distinct ids');
 
-  // newest-first: carol's second approve, then bob's reject, then alice's first approve
-  assert.equal(history.body.items[0].actorRef, 'carol@example.com');
+  // Persisted decision identities establish order; the verified caller owns
+  // every actor field regardless of compatibility reviewer strings.
+  assert.deepEqual(ids, [a2.body.id, r1.body.id, a1.body.id]);
+  assert.ok(history.body.items.every((item) => item.actorRef === 'svc-acceptance' && item.actorType === 'agent'));
   assert.equal(history.body.items[0].decision, 'approve');
-  assert.equal(history.body.items[1].actorRef, 'bob@example.com');
   assert.equal(history.body.items[1].decision, 'reject');
-  assert.equal(history.body.items[2].actorRef, 'alice@example.com');
   assert.equal(history.body.items[2].decision, 'approve');
 });
 
@@ -169,7 +170,7 @@ test("manifest.build.flows[].approved* projects the LATEST approval row, not the
   const flow = body.manifest.build.flows.find((f) => f.id === 'primary');
   assert.ok(flow, 'flow must be present in the projected manifest');
   assert.equal(flow.approved, false, 'must reflect the LATEST (reject) decision, not the first approve');
-  assert.equal(flow.approvedBy, 'bob@example.com');
+  assert.equal(flow.approvedBy, 'svc-acceptance');
 });
 
 // ---- Stamp-binding: contentStamp mismatch -> 409 --------------------------

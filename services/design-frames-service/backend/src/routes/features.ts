@@ -8,15 +8,16 @@ import * as fileStore from '../lib/fileStore';
 import { computeStamp } from '../lib/stampLib';
 import { validateManifest } from '../lib/manifestSchema';
 import { projectManifest, type LatestApprovalForFlow } from '../lib/projection';
-import { assertRef, type EntityId } from '../lib/identity';
+import { assertRef, fromUuid, type EntityId } from '../lib/identity';
 import * as featureRepo from '../repositories/featureRepo';
 import * as flowRepo from '../repositories/flowRepo';
 import * as approvalRepo from '../repositories/approvalRepo';
 import * as projectRepo from '../repositories/projectRepo';
 import * as frameRefRepo from '../repositories/frameRefRepo';
-import { ConflictError, StampConflictError, ValidationError } from '../lib/errors';
+import { ConflictError, ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
+import { authenticatedActor } from '../middleware/auth';
 
 export const featuresRouter = Router();
 
@@ -35,9 +36,34 @@ async function latestApprovalsAsProjectionInput(
       decision: row.decision,
       actorRef: row.actor_ref,
       decidedAt: row.decided_at.toISOString(),
+      contentStamp: row.content_stamp,
     });
   }
   return out;
+}
+
+async function indexRevision(revision: fileStore.StoreRevision, req: Request) {
+  const featureRow = await featureRepo.findOrCreateFeatureBySlug(revision.slug, log(req));
+  const manifest = revision.manifest as {
+    frames?: Array<{ file: string; flow?: string }>;
+    build?: { flows?: Array<{ id: string }> };
+  };
+  const flowIdByKey = new Map<string, string>();
+  for (const flowDecl of manifest.build?.flows ?? []) {
+    const flowRow = await flowRepo.findOrCreateFlow(featureRow.id, flowDecl.id, log(req));
+    flowIdByKey.set(flowDecl.id, flowRow.id);
+  }
+  const flowByFile = new Map((manifest.frames ?? []).map((frame) => [frame.file, frame.flow]));
+  const actualFrames = Array.from(revision.frames.keys()).map((file) => ({ file, flow: flowByFile.get(file) }));
+  await frameRefRepo.indexFrameRefsFromManifest(featureRow.id, actualFrames, flowIdByKey, revision.stamp, log(req));
+}
+
+function suppliedStamp(body: Record<string, unknown>): string | undefined {
+  if (body.contentStamp === undefined) return undefined;
+  if (typeof body.contentStamp !== 'string' || !/^[a-f0-9]{64}$/.test(body.contentStamp)) {
+    throw new ValidationError('contentStamp must be a lowercase sha256 hex digest');
+  }
+  return body.contentStamp;
 }
 
 // GET /api/v1/features — byte-compatible with v0.1.0 (unpaginated {features:[...]}).
@@ -97,8 +123,36 @@ featuresRouter.get('/:slug', async (req, res) => {
   const feature = await fileStore.getFeature(req.params.slug);
   const featureRow = await featureRepo.findFeatureBySlug(req.params.slug, log(req));
   const latest = featureRow ? await latestApprovalsAsProjectionInput(featureRow.id, log(req)) : new Map();
-  const manifest = projectManifest(feature.manifest, latest);
+  const manifest = projectManifest(feature.manifest, latest, computeStamp(feature));
   res.status(200).json({ slug: req.params.slug, manifest, frames: Object.fromEntries(feature.frames) });
+});
+
+// A complete repository import is one content transaction. CAS prevents two
+// publishers built from the same base from silently overwriting one another.
+featuresRouter.post('/:slug/import', async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const errors = validateManifest(body.manifest);
+  if (errors.length) throw new ValidationError('manifest validation failed', errors);
+  if (!body.frames || typeof body.frames !== 'object' || Array.isArray(body.frames)) {
+    throw new ValidationError('frames must be an object mapping filenames to HTML');
+  }
+  if (body.expectedStamp !== undefined && body.expectedStamp !== null &&
+      (typeof body.expectedStamp !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedStamp))) {
+    throw new ValidationError('expectedStamp must be a lowercase sha256 digest or null');
+  }
+  const manifest = body.manifest as Record<string, unknown>;
+  const frames = new Map(Object.entries(body.frames as Record<string, string>));
+  const required = new Set([
+    String(manifest.entry),
+    ...((manifest.frames as Array<{ file: string }>) ?? []).map((frame) => frame.file),
+  ]);
+  for (const file of required) {
+    if (!frames.has(file)) throw new ValidationError(`import is missing required frame '${file}'`);
+  }
+  const revision = await fileStore.importFeature(req.params.slug, manifest, frames, body.expectedStamp as string | null | undefined);
+  // A retry after a DB outage reuses the immutable snapshot and repairs index rows.
+  await indexRevision(revision, req);
+  res.status(200).json({ slug: revision.slug, stamp: revision.stamp, frameCount: revision.frames.size, revision: revision.metadata });
 });
 
 // PUT /api/v1/features/:slug/manifest
@@ -121,11 +175,47 @@ featuresRouter.get('/:slug/stamp', async (req, res) => {
   });
 });
 
+// Immutable content snapshots. The current feature stays mutable for import
+// and authoring; these routes let the hosted reviewer revisit any stamped
+// revision without relying on a force-pushed Git branch or old Pages build.
+featuresRouter.get('/:slug/revisions', async (req, res) => {
+  res.status(200).json({ slug: req.params.slug, revisions: await fileStore.listRevisions(req.params.slug) });
+});
+
+featuresRouter.get('/:slug/revisions/:stamp', async (req, res) => {
+  const revision = await fileStore.getRevision(req.params.slug, req.params.stamp);
+  res.status(200).json({
+    slug: revision.slug,
+    stamp: revision.stamp,
+    revision: revision.metadata,
+    manifest: revision.manifest,
+    frames: Object.fromEntries(revision.frames),
+  });
+});
+
+// Frame identity is revision-scoped. Consumers use the returned `id` as the
+// targetRef for a frame/element discussion, making an annotation unambiguously
+// about the bytes represented by this stamp.
+featuresRouter.get('/:slug/revisions/:stamp/frame-refs', async (req, res) => {
+  const feature = await featureRepo.requireFeatureRowBySlug(req.params.slug, log(req));
+  const revision = await fileStore.getRevision(req.params.slug, req.params.stamp);
+  const refs = await frameRefRepo.listByFeatureAndStamp(feature.id, revision.stamp, log(req));
+  res.status(200).json({
+    slug: revision.slug,
+    stamp: revision.stamp,
+    frames: refs.map((frame) => ({
+      id: fromUuid('frameRef', frame.id),
+      file: frame.file,
+      flowId: frame.flow_id ? fromUuid('flow', frame.flow_id) : null,
+      contentStamp: frame.content_stamp,
+    })),
+  });
+});
+
 // POST /api/v1/features/:slug/stamp — compute AND persist.
 featuresRouter.post('/:slug/stamp', async (req, res) => {
-  const feature = await fileStore.getFeature(req.params.slug);
-  const stamp = computeStamp(feature);
-  await fileStore.setStamp(req.params.slug, stamp);
+  const feature = await fileStore.commitRevision(req.params.slug);
+  const stamp = feature.stamp;
 
   // Index a frame_ref row per ACTUAL frame file at this stamp, so `frame`/
   // `element` discussion targets (DiscussionTargetType, docs/postgres-tier.md)
@@ -136,19 +226,7 @@ featuresRouter.post('/:slug/stamp', async (req, res) => {
   // `manifest.frames`: a frame written via PUT .../frames/:file never
   // requires the manifest to separately declare it, so keying off the
   // manifest array would miss exactly the case this fix targets.
-  const featureRow = await featureRepo.findOrCreateFeatureBySlug(req.params.slug, log(req));
-  const manifest = feature.manifest as {
-    frames?: Array<{ file: string; flow?: string }>;
-    build?: { flows?: Array<{ id: string }> };
-  };
-  const flowIdByKey = new Map<string, string>();
-  for (const flowDecl of manifest.build?.flows ?? []) {
-    const flowRow = await flowRepo.findOrCreateFlow(featureRow.id, flowDecl.id, log(req));
-    flowIdByKey.set(flowDecl.id, flowRow.id);
-  }
-  const flowByFile = new Map((manifest.frames ?? []).map((f) => [f.file, f.flow]));
-  const actualFrames = Array.from(feature.frames.keys()).map((file) => ({ file, flow: flowByFile.get(file) }));
-  await frameRefRepo.indexFrameRefsFromManifest(featureRow.id, actualFrames, flowIdByKey, stamp, log(req));
+  await indexRevision(feature, req);
 
   res.status(200).json({ slug: req.params.slug, stamp });
 });
@@ -194,32 +272,18 @@ featuresRouter.post('/:slug/flows/:flowId/approve', async (req, res) => {
   if (typeof body.approvedBy !== 'string' || body.approvedBy.length === 0) {
     throw new ValidationError('approvedBy is required');
   }
-  const actorType = body.actorType === 'agent' ? 'agent' : 'user';
-  const contentStamp = typeof body.contentStamp === 'string' ? body.contentStamp : null;
+  const { actorRef, actorType } = authenticatedActor(req);
+  const contentStamp = suppliedStamp(body);
 
   const featureRow = await featureRepo.requireFeatureRowBySlug(slug, log(req));
-  const feature = await fileStore.getFeature(slug);
-  const currentStamp = computeStamp(feature);
-  if (contentStamp !== null && contentStamp !== currentStamp) {
-    throw new StampConflictError(currentStamp, contentStamp);
-  }
-
   const flow = await flowRepo.findOrCreateFlow(featureRow.id, flowKey, log(req));
   const decidedAt = new Date();
-  const row = await approvalRepo.insertApproval(
-    { flowId: flow.id, decision: 'approve', actorRef: body.approvedBy, actorType, contentStamp, reason: null },
-    log(req)
+  const row = await fileStore.withCurrentRevision(slug, contentStamp,
+    async (_feature, stamp) => approvalRepo.insertApproval(
+      { flowId: flow.id, decision: 'approve', actorRef, actorType, contentStamp: stamp, reason: null }, log(req)
+    ),
+    { flowKey, value: { approved: true, approvedBy: actorRef, approvedAt: decidedAt.toISOString(), rejectionReason: null } }
   );
-
-  // Dual-write: keep the flat-file projection in sync for any legacy reader.
-  await fileStore
-    .setFlowApproval(slug, flowKey, { approved: true, approvedBy: body.approvedBy, approvedAt: decidedAt.toISOString() })
-    .catch((err) => {
-      // A flow the manifest never declared (e.g. approved purely through this
-      // tier before the manifest lists it) has nothing to project onto in the
-      // file — the Postgres row (the source of truth) still recorded fine.
-      log(req).warn({ err, slug, flowKey }, 'dual-write: flat-file flow projection skipped (flow not in manifest)');
-    });
 
   res.status(200).json(approvalRepo.toApprovalDTO(row, slug, flowKey));
 });
@@ -242,28 +306,18 @@ featuresRouter.post('/:slug/flows/:flowId/reject', async (req, res) => {
   if (typeof body.reason !== 'string' || body.reason.trim().length === 0) {
     throw new ValidationError('reason is required');
   }
-  const actorRef = typeof body.rejectedBy === 'string' ? body.rejectedBy : 'unknown';
-  const actorType = body.actorType === 'agent' ? 'agent' : 'user';
-  const contentStamp = typeof body.contentStamp === 'string' ? body.contentStamp : null;
+  const { actorRef, actorType } = authenticatedActor(req);
+  const contentStamp = suppliedStamp(body);
 
   const featureRow = await featureRepo.requireFeatureRowBySlug(slug, log(req));
-  if (contentStamp !== null) {
-    const feature = await fileStore.getFeature(slug);
-    const currentStamp = computeStamp(feature);
-    if (contentStamp !== currentStamp) throw new StampConflictError(currentStamp, contentStamp);
-  }
-
   const flow = await flowRepo.findOrCreateFlow(featureRow.id, flowKey, log(req));
-  const row = await approvalRepo.insertApproval(
-    { flowId: flow.id, decision: 'reject', actorRef, actorType, contentStamp, reason: body.reason },
-    log(req)
+  const reason = body.reason;
+  const row = await fileStore.withCurrentRevision(slug, contentStamp,
+    async (_feature, stamp) => approvalRepo.insertApproval(
+      { flowId: flow.id, decision: 'reject', actorRef, actorType, contentStamp: stamp, reason }, log(req)
+    ),
+    { flowKey, value: { approved: false, approvedBy: null, approvedAt: null, rejectionReason: reason } }
   );
-
-  await fileStore
-    .setFlowApproval(slug, flowKey, { approved: false, approvedBy: null, approvedAt: null, rejectionReason: body.reason })
-    .catch((err) => {
-      log(req).warn({ err, slug, flowKey }, 'dual-write: flat-file flow projection skipped (flow not in manifest)');
-    });
 
   res.status(200).json(approvalRepo.toApprovalDTO(row, slug, flowKey));
 });

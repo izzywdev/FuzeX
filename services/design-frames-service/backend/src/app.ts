@@ -2,12 +2,18 @@
 // mountable/runnable alongside it (docs/postgres-tier.md step 3).
 
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { access, mkdir } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import type { ClientConfig, QueryConfig } from 'pg';
 import { requestLogger } from './lib/logger';
+import { getPool } from './lib/db';
+import { DATA_DIR, getFrame } from './lib/fileStore';
 import { requireAuthForWrites } from './middleware/auth';
 import { errorHandler } from './lib/errors';
 import { projectsRouter } from './routes/projects';
 import { featuresRouter } from './routes/features';
 import { discussionsRouter, featureDiscussionsRouter } from './routes/discussions';
+import { generationsRouter } from './routes/generations';
 
 export function createApp() {
   const app = express();
@@ -43,10 +49,52 @@ export function createApp() {
   });
 
   app.get('/health', (_req, res) => res.status(200).json({ status: 'healthy', timestamp: Date.now() }));
+  // Liveness above stays independent of external dependencies. Readiness must
+  // fail if the schema or durable content volume is unavailable, so Kubernetes
+  // stops routing reviews to a process that cannot retain their evidence.
+  app.get('/ready', async (_req, res) => {
+    try {
+      // pg supports query_timeout per query at runtime, while @types/pg
+      // currently declares it only on ClientConfig.
+      const readinessQuery: QueryConfig & Pick<ClientConfig, 'query_timeout'> = {
+        text: 'SELECT id FROM design_frames.project LIMIT 0',
+        query_timeout: 2000,
+      };
+      await Promise.all([
+        getPool().query(readinessQuery),
+        mkdir(DATA_DIR, { recursive: true }).then(() => access(DATA_DIR, constants.R_OK | constants.W_OK)),
+      ]);
+      res.status(200).json({ status: 'ready' });
+    } catch {
+      // Connection strings and filesystem paths never leave the health boundary.
+      res.status(503).json({ status: 'not ready' });
+    }
+  });
+
+  // Serve a hosted preview only through the content store's slug/file
+  // validation. Exposing DATA_DIR through express.static would leak internal
+  // revision artifacts and bypass traversal protections. The MFE renders this
+  // endpoint in a sandboxed iframe; this policy adds defense in depth.
+  app.get('/site/:slug/:file', async (req, res, next) => {
+    try {
+      const html = await getFrame(req.params.slug, decodeURIComponent(req.params.file));
+      res
+        .status(200)
+        .type('html')
+        .setHeader(
+          'Content-Security-Policy',
+          "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; font-src data: https:; base-uri 'none'; form-action 'none'"
+        )
+        .send(html);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.use(requireAuthForWrites);
 
   app.use('/api/v1/features', featureDiscussionsRouter); // GET /:slug/discussions convenience, matched first
+  app.use('/api/v1/features', generationsRouter);
   app.use('/api/v1/features', featuresRouter);
   app.use('/api/v1/projects', projectsRouter);
   app.use('/api/v1/discussions', discussionsRouter);

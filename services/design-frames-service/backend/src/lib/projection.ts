@@ -10,6 +10,7 @@ export interface LatestApprovalForFlow {
   decision: 'approve' | 'reject';
   actorRef: string;
   decidedAt: string; // ISO 8601
+  contentStamp?: string | null;
 }
 
 export interface ManifestFlow {
@@ -35,12 +36,16 @@ export interface ManifestLike {
  */
 export function projectManifest(
   manifest: ManifestLike,
-  latestByFlowKey: ReadonlyMap<string, LatestApprovalForFlow>
+  latestByFlowKey: ReadonlyMap<string, LatestApprovalForFlow>,
+  currentStamp?: string
 ): ManifestLike {
   if (!manifest?.build?.flows || !Array.isArray(manifest.build.flows)) return manifest;
   const flows = manifest.build.flows.map((flow) => {
     const latest = latestByFlowKey.get(flow.id);
     if (!latest) return flow;
+    if (currentStamp !== undefined && latest.contentStamp !== currentStamp) {
+      return { ...flow, approved: false, approvedBy: null, approvedAt: null, rejectionReason: null };
+    }
     return {
       ...flow,
       approved: latest.decision === 'approve',

@@ -7,6 +7,11 @@ import { assertRef, toUuid, type EntityId } from '../lib/identity';
 import { ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
+import { authenticatedActor, type AuthenticatedRequest } from '../middleware/auth';
+import * as designSystemRepo from '../repositories/designSystemRepo';
+import * as fileStore from '../lib/fileStore';
+import { parseDesignSystemRevision, parseRevisionNumber } from '../lib/designSystem';
+import { NotFoundError, UnauthorizedError } from '../lib/errors';
 
 export const projectsRouter = Router();
 
@@ -65,6 +70,11 @@ projectsRouter.patch('/:id', async (req, res) => {
   if (body.name !== undefined && (typeof body.name !== 'string' || body.name.trim().length === 0)) {
     errors.push('name must be a non-empty string');
   }
+  for (const key of ['description', 'sourceRepo']) {
+    if (body[key] !== undefined && body[key] !== null && typeof body[key] !== 'string') {
+      errors.push(`${key} must be a string or null`);
+    }
+  }
   if (errors.length) throw new ValidationError('invalid project patch body', errors);
 
   const patched = await projectRepo.patchProject(
@@ -87,4 +97,54 @@ projectsRouter.get('/:id/features', async (req, res) => {
   const page = parsePageParams(req.query as Record<string, unknown>);
   const result = await listFeaturesByProject(toUuid(id), page, log(req));
   res.status(200).json(result);
+});
+
+// Projects are the hosted application workspaces. Counts use the authoritative
+// manifests so untouched flows do not disappear from the workspace summary.
+projectsRouter.get('/:id/workspace', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const project = await projectRepo.getProject(id, log(req));
+  const features = await projectRepo.listFeatureIdsByProject(toUuid(id), log(req));
+  let flowCount = 0;
+  let frameCount = 0;
+  for (const feature of features) {
+    const manifest = await fileStore.getManifest(feature.slug);
+    const flows = (manifest.build as { flows?: unknown[] } | undefined)?.flows;
+    flowCount += Array.isArray(flows) ? flows.length : 0;
+    frameCount += Array.isArray(manifest.frames) ? manifest.frames.length : 0;
+  }
+  const designSystem = await designSystemRepo.getDesignSystemRevision(id, null, log(req));
+  res.status(200).json({ project, featureCount: features.length, flowCount, frameCount, designSystem });
+});
+
+projectsRouter.get('/:id/design-system', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  await projectRepo.getProject(id, log(req));
+  const revision = await designSystemRepo.getDesignSystemRevision(id, null, log(req));
+  if (!revision) throw new NotFoundError(`project '${id}' has no design system revisions`);
+  res.status(200).json(revision);
+});
+
+projectsRouter.get('/:id/design-system/revisions', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  await projectRepo.getProject(id, log(req));
+  const page = parsePageParams(req.query as Record<string, unknown>);
+  res.status(200).json(await designSystemRepo.listDesignSystemRevisions(id, page, log(req)));
+});
+
+projectsRouter.get('/:id/design-system/revisions/:revision', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const version = parseRevisionNumber(req.params.revision);
+  await projectRepo.getProject(id, log(req));
+  const revision = await designSystemRepo.getDesignSystemRevision(id, version, log(req));
+  if (!revision) throw new NotFoundError(`design system revision '${version}' not found for project '${id}'`);
+  res.status(200).json(revision);
+});
+
+projectsRouter.post('/:id/design-system/revisions', async (req: AuthenticatedRequest, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const input = parseDesignSystemRevision(req.body);
+  const actor = authenticatedActor(req).actorRef;
+  if (!actor) throw new UnauthorizedError('a verified caller is required');
+  res.status(201).json(await designSystemRepo.createDesignSystemRevision(id, input, actor, log(req)));
 });

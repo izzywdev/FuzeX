@@ -30,9 +30,10 @@ metadata:
     app.kubernetes.io/component: db-migrate
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: {{ .Values.postgresTier.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.postgresTier.migration.activeDeadlineSeconds }}
   template:
     metadata:
       labels:

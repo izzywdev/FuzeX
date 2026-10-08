@@ -22,6 +22,7 @@ metadata:
     {{- include "fuzex.labels" . | nindent 4 }}
   annotations:
     helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes: [ReadWriteOnce]
   {{- with .Values.persistence.storageClass }}

@@ -12,7 +12,8 @@
     "dev": "vite --port 4401",
     "build": "vite build",
     "preview": "vite preview --port 4402",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

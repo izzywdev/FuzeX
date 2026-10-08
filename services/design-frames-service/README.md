@@ -22,6 +22,47 @@ design tool becomes the system of record for a file's review state without becom
 the only place that file exists. Content is re-synced from the owning repo whenever it
 changes; approval/reject state and the review site live here.
 
+## Import existing GitHub Pages frame sets
+
+Import from the **repository source** that generated Pages, not from a scraped
+deployment. This retains manifests, flow mappings, and provenance without
+turning the service into an arbitrary URL fetcher. Check out the desired
+revision, then run:
+
+```bash
+DESIGN_FRAMES_SERVICE_URL=https://fuzex.example.com \
+DESIGN_FRAMES_API_TOKEN=… \
+node client/design-frames-client.mjs sync-all /path/to/FuzeFront/design/frames \
+  https://github.com/izzywdev/FuzeFront
+```
+
+The importer reads the original repository files into one source snapshot,
+embeds linked local CSS, and submits the entire manifest and frame set in one
+atomic import. It removes files absent from a later source set. Concurrent
+publishers use compare-and-swap: a changed base returns 409 rather than
+silently overwriting another import. Each unique hosted content stamp is retained
+as an immutable revision, so later imports cannot rewrite reviewed frames.
+
+Provenance distinguishes `manifest.sourceStamp` (FuzeFront's original source-tree
+hash before CSS embedding) from `manifest.stamp` (the hosted artifact hash).
+`sourceRepo` and `importerVersion` are recorded in both the manifest and revision
+metadata. A source stamp includes every original file, including CSS, using the
+same canonical manifest and path ordering as `scripts/stamp-frames.mjs`.
+
+Hosted approve/reject requests always record a content stamp. Clients should
+send the stamp displayed during review; stale reviews return 409. Legacy callers
+that omit the stamp bind to current content under the same write guard.
+Changing content leaves earlier decisions in history and clears their approval
+projection for the new revision.
+
+Publication uses immutable directories and an atomically replaced current
+pointer. Per-feature filesystem locks also serialize independent service
+processes sharing the same volume. A lock timeout returns 409; an interrupted
+writer's lock requires an operator to verify that no writer is active before
+removing it. Working generations are retained for in-flight readers; storage
+retention must preserve immutable revisions and coordinate any working-generation
+cleanup with readers.
+
 ## What it replaces (and what it doesn't — yet)
 
 FuzeFront's original pipeline authored frames as files directly in its own repo
@@ -85,9 +126,12 @@ See [`openapi.yaml`](./openapi.yaml) for the full contract. Summary:
 | GET | `/api/v1/features` | none | list features + flow approval summary |
 | POST | `/api/v1/features` | token | create a feature shell |
 | GET | `/api/v1/features/:slug` | none | manifest + all frame contents |
+| POST | `/api/v1/features/:slug/import` | token | atomically replace the entire manifest/frame set; optional `expectedStamp` CAS |
 | PUT | `/api/v1/features/:slug/manifest` | token | replace the manifest (schema-validated) |
 | GET | `/api/v1/features/:slug/stamp` | none | compute the current content stamp, compare to the persisted one |
 | POST | `/api/v1/features/:slug/stamp` | token | compute AND persist the stamp (binds future approvals to current content) |
+| GET | `/api/v1/features/:slug/revisions` | none | list immutable content revisions |
+| GET | `/api/v1/features/:slug/revisions/:stamp` | none | retrieve one revision's manifest and frame bytes |
 | GET/PUT/DELETE | `/api/v1/features/:slug/frames/:file` | none / token / token | one frame's HTML |
 | POST | `/api/v1/features/:slug/flows/:flowId/approve` | token | approve a flow — `{ "approvedBy": "..." }` |
 | POST | `/api/v1/features/:slug/flows/:flowId/reject` | token | revoke approval |

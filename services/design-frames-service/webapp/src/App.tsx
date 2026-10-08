@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from 'react'
-import { Input, Eyebrow } from '@izzywdev/fuzefront-design-system'
-import { FeatureList } from './components/FeatureList'
+import { Eyebrow } from '@izzywdev/fuzefront-design-system'
 import { FeatureDetail } from './components/FeatureDetail'
+import { AppList } from './components/AppList'
+import { AppWorkspace } from './components/AppWorkspace'
 
 /**
  * React port of design-frames-service's vanilla review UI
  * (services/design-frames-service/frontend/{index.html,app.js,styles.css}),
  * built design-system-first on @izzywdev/fuzefront-design-system so it can
  * mount as a Module-Federation portal tile in the FuzeFront host shell
- * instead of an iframe. Talks to the SAME REST API the vanilla page used
- * (services/design-frames-service/openapi.yaml) — no shape changes.
+ * instead of an iframe. Uses the hosted project, revision, discussion and
+ * generation API (services/design-frames-service/openapi.yaml).
  *
- * Routing mirrors the vanilla page's hash-based nav (#/<slug> = feature
- * detail, no hash = feature list) so this remote works identically whether
+ * Hash routing retains #/<slug> for feature detail and adds #/apps/<id>
+ * for app workspaces; no hash displays apps. This works identically whether
  * loaded standalone or mounted inside the host shell (which does not own
  * this remote's internal navigation).
  *
@@ -20,11 +21,13 @@ import { FeatureDetail } from './components/FeatureDetail'
  * './DesignFramesApp' (see vite.config.ts).
  */
 export default function App() {
-  const [slug, setSlug] = useState<string | null>(() => readSlugFromHash())
-  const [token, setToken] = useState('')
+  const [route, setRoute] = useState(() => readRouteFromHash())
+  // Browser writes use FuzeFront's same-origin delegated proxy. A workload
+  // credential is never rendered, stored, or accepted from the browser.
+  const token = ''
 
   useEffect(() => {
-    const onHashChange = () => setSlug(readSlugFromHash())
+    const onHashChange = () => setRoute(readRouteFromHash())
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
@@ -40,7 +43,7 @@ export default function App() {
       }}
     >
       <header style={{ maxWidth: '1040px', margin: '0 auto var(--space-6)' }}>
-        <Eyebrow>Design Frames</Eyebrow>
+        <Eyebrow>FuzeX workspace</Eyebrow>
         <h1
           style={{
             fontFamily: 'var(--font-display)',
@@ -49,7 +52,7 @@ export default function App() {
             color: 'var(--text-primary)',
           }}
         >
-          Design Frames Review
+          Apps, flows & reviews
         </h1>
         <p
           style={{
@@ -58,40 +61,39 @@ export default function App() {
             maxWidth: '640px',
           }}
         >
-          Navigable frames, contract, and per-flow approval for the
-          product-design phase — served by FuzeX's design-frames-service.
+          Imported app frames, revision history, and per-flow review for the
+          product-design phase.
         </p>
-        <div style={{ maxWidth: '360px' }}>
-          <Input
-            label="API token (writes only)"
-            type="password"
-            placeholder="paste a DESIGN_FRAMES_API_TOKENS value"
-            autoComplete="off"
-            value={token}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
-          />
-        </div>
       </header>
 
       <main style={{ maxWidth: '1040px', margin: '0 auto' }}>
-        {slug ? (
+        {route.type === 'feature' ? (
           <FeatureDetail
-            slug={slug}
+            key={route.slug}
+            slug={route.slug}
             token={token}
             onBack={() => {
               window.location.hash = ''
             }}
           />
+        ) : route.type === 'app' ? (
+          <AppWorkspace key={route.id} projectId={route.id} token={token} onBack={() => { window.location.hash = '' }} onSelect={(slug) => { window.location.hash = `/${encodeURIComponent(slug)}` }} />
         ) : (
-          <FeatureList onSelect={(s) => (window.location.hash = `/${encodeURIComponent(s)}`)} />
+          <AppList token={token} onSelect={(id) => { window.location.hash = `/apps/${encodeURIComponent(id)}` }} onSelectFeature={(slug) => { window.location.hash = `/${encodeURIComponent(slug)}` }} />
         )}
       </main>
     </div>
   )
 }
 
-function readSlugFromHash(): string | null {
-  if (typeof window === 'undefined') return null
-  const hash = window.location.hash.replace(/^#\//, '')
-  return hash ? decodeURIComponent(hash) : null
+type Route = { type: 'home' } | { type: 'feature'; slug: string } | { type: 'app'; id: string }
+
+function readRouteFromHash(): Route {
+  if (typeof window === 'undefined') return { type: 'home' }
+  const hash = window.location.hash.replace(/^#\/?/, '')
+  if (!hash) return { type: 'home' }
+  try {
+    if (hash.startsWith('apps/')) return { type: 'app', id: decodeURIComponent(hash.slice(5)) }
+    return { type: 'feature', slug: decodeURIComponent(hash) }
+  } catch { return { type: 'home' } }
 }
