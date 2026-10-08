@@ -60,8 +60,8 @@ jobs:
       - name: Chart lints on both values overlays
         working-directory: deploy/helm
         run: |
-          helm lint fuzex
-          helm lint fuzex -f fuzex/values-prod.yaml
+          helm lint fuzex -n fuzex
+          helm lint fuzex -n fuzex -f fuzex/values-prod.yaml
 
       # `--set enabled=true` on purpose. values-prod.yaml ships the whole chart
       # OFF until the image is published and the secrets are sealed, so the default

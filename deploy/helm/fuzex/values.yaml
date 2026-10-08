@@ -178,10 +178,10 @@ postgresTier:
     # path").
     port: 4410
 
-  # -- DATABASE_URL, sourced from a FuzeInfra-provisioned SealedSecret in the
-  # `fuzex` namespace. This chart NEVER creates the secret, the role, the
-  # schema, or the database itself — see
-  # deploy/infra-requests/design-frames-postgres.md for the hand-off request.
+  # -- DATABASE_URL: FuzeInfra provisions the role/database and publishes
+  # hand-off `fuzex-postgres` as strictly scoped ciphertext into
+  # files/secrets/design-frames-db-sealed.yaml. This chart renders that
+  # SealedSecret in wave -2; it never receives a plaintext password.
   # NOT `optional` in the pod spec (unlike apiTokens above): backend/src/lib/db.ts
   # throws on the first query if DATABASE_URL is unset, so a pod missing it
   # should fail loudly (CrashLoopBackOff) rather than silently 500 every
@@ -195,8 +195,8 @@ postgresTier:
     limits: { cpu: 500m, memory: 256Mi }
 
   # -- the db-migration Job (db/migrate.sh, templates/db-migrate-job.yaml),
-  # run as an Argo CD PreSync hook — see that template for why PreSync (Argo)
-  # and not a Helm pre-install/pre-upgrade hook.
+  # run as an Argo CD Sync hook in wave -1, AFTER first credential delivery
+  # and BEFORE writer rollout. See db-migrate-job.yaml for bootstrap ordering.
   migration:
     # migrate.sh is idempotent end-to-end (db/README.md) — tracked per-file in
     # design_frames._migrations, and every migration file is independently

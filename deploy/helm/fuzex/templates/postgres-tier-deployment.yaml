@@ -32,10 +32,11 @@ spec:
     metadata:
       labels:
         {{- include "fuzex.pgTierSelectorLabels" . | nindent 8 }}
-      {{- if .Values.registration.enabled }}
       annotations:
+        checksum/database-secret: {{ .Files.Get "files/secrets/design-frames-db-sealed.yaml" | sha256sum }}
+        {{- if .Values.registration.enabled }}
         checksum/registration: {{ (.Files.Glob "files/registration/*").AsConfig | sha256sum }}
-      {{- end }}
+        {{- end }}
     spec:
       securityContext:
         fsGroup: 1000
@@ -99,8 +100,8 @@ spec:
               value: {{ .Values.fuzefront.requiredScope | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.postgresTier.logLevel | quote }}
-            # Sourced from a FuzeInfra-provisioned SealedSecret — this chart
-            # never creates it (deploy/infra-requests/design-frames-postgres.md).
+            # FuzeInfra publishes the sealed credential into this chart's files/
+            # directory; templates/design-frames-db-sealed.yaml applies it.
             # NOT optional: backend/src/lib/db.ts throws on the first query if
             # this is unset, so a pod missing it should fail loudly rather
             # than silently 500 every lifecycle request.

@@ -26,4 +26,4 @@ jobs:
           version: v3.16.4
       - run: pip install PyYAML==6.0.3
       - run: python scripts/check-hosted-chart.py
-      - run: helm lint deploy/helm/fuzex -f deploy/helm/fuzex/values-prod.yaml --set postgresTier.enabled=true
+      - run: helm lint deploy/helm/fuzex -n fuzex -f deploy/helm/fuzex/values-prod.yaml --set postgresTier.enabled=true

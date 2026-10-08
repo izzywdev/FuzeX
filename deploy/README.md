@@ -54,7 +54,7 @@ validate both sides of this cutover, namespaced routes and unsafe-values guards.
    that reads the same historical frame, discussion thread and review decision.
 4. Enable the lifecycle tier only after storage, migration and authentication
    prerequisites are satisfied. Run chart validation against both the legacy
-   and hosted values. Argo must complete the migration PreSync Job before API
+   and hosted values. Argo must complete the migration Sync Job in wave -1 before API
    rollout. A failed migration keeps the rollout blocked; inspect its logs before
    retrying. The Job has a deadline and is replaced on the next sync so a failed
    Job does not permanently block retries.
@@ -84,6 +84,24 @@ an external database outage.
 For production status, use FuzeInfra's read-only `cluster-query` workflow to fetch
 pods, deployments, events, PVCs and hook Job logs. Cluster mutations and backup
 operations belong to the delegated FuzeInfra work item.
+
+## Automated database and credential provisioning
+
+FuzeInfra's `serviceDatabases` entry `fuzex` provisions role `fuzex_svc` and
+database `fuzex_design_frames` on the shared Postgres service. Its provider
+credential is `fuzeinfra/fuzex-db-credentials:password`; agents never read it.
+Dispatch FuzeInfra's `publish-sealed-handoff` with `id=fuzex-postgres` after
+provisioning. The workflow composes and seals the connection URL for
+`fuzex/fuzex-design-frames-db:DATABASE_URL`, then opens a ciphertext-only PR
+updating `deploy/helm/fuzex/files/secrets/design-frames-db-sealed.yaml`.
+The registry's verifier checks role/database connectivity without printing a
+credential. The scheduled publisher refreshes delivery after future rotations.
+
+The chart renders the delivered SealedSecret in wave -2, before the migration
+Sync hook in wave -1 and writer rollout in waves 0/1. This ordering also works
+on first installation; a PreSync migration could block its own Secret delivery.
+A checksum of the sealed file rolls the API when the credential changes. Do not
+copy a password through logs, dispatch inputs, Jira, or the agent workspace.
 
 ## Rollback
 
