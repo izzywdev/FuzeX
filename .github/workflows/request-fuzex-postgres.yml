@@ -1,0 +1,36 @@
+name: Request FuzeX PostgreSQL provisioning
+
+# This is the consumer side of FuzeInfra's fixed `provision-fuzex-postgres`
+# repository-dispatch capability. It cannot choose a target workflow, database,
+# namespace, role, or arbitrary command. The target operation itself opens the
+# reviewed GitOps PR; it never mutates the cluster directly.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: request-fuzex-postgres
+  cancel-in-progress: false
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request the fixed FuzeInfra provisioning operation
+        env:
+          GH_TOKEN: ${{ secrets.FUZEINFRA_DISPATCH_TOKEN }}
+          REQUESTER: ${{ github.repository }}
+          REQUEST_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo '::error::FUZEINFRA_DISPATCH_TOKEN is required. It must be a fine-grained token scoped only to izzywdev/FuzeInfra with Contents: read+write.'
+            exit 1
+          fi
+          jq -nc --arg requester "$REQUESTER" --arg ref "$REQUEST_REF" \
+            '{event_type:"provision-fuzex-postgres",client_payload:{requester:$requester,ref:$ref}}' \
+            | gh api --method POST repos/izzywdev/FuzeInfra/dispatches --input -
+          echo 'Requested FuzeInfra provisioning. Track the resulting reviewed GitOps PR there.'
