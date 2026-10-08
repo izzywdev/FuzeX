@@ -47,7 +47,16 @@ async function indexRevision(revision: fileStore.StoreRevision, req: Request) {
   const manifest = revision.manifest as {
     frames?: Array<{ file: string; flow?: string }>;
     build?: { flows?: Array<{ id: string }> };
+    sourceRepo?: unknown;
   };
+  // A repository import becomes visible in the portal catalogue without a
+  // second, mutable project-id setting in every consuming repo. Existing
+  // manually-created features remain unassigned unless their manifest carries
+  // provenance, preserving backward compatibility.
+  if (typeof manifest.sourceRepo === 'string' && manifest.sourceRepo.trim()) {
+    const project = await projectRepo.getOrCreateImportedProject(manifest.sourceRepo, log(req));
+    await featureRepo.assignFeatureToProject(featureRow.id, project.id, log(req));
+  }
   const flowIdByKey = new Map<string, string>();
   for (const flowDecl of manifest.build?.flows ?? []) {
     const flowRow = await flowRepo.findOrCreateFlow(featureRow.id, flowDecl.id, log(req));

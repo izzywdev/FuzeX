@@ -201,6 +201,23 @@ test('GET /api/v1/projects/:id/features lists the assigned feature, paginated', 
   assert.equal(body.items[0].slug, 'checkout-redesign');
 });
 
+test('repository import resolves source provenance into its portal app workspace', async () => {
+  const manifest = {
+    name: 'Imported FuzeFront frames', description: 'd', designSystem: 'fuse-seam',
+    entry: 'index.html', sourceRepo: 'FuzeFront',
+    frames: [{ id: 'home', file: 'index.html', label: 'Home', summary: 's', testHooks: ['data-testid=home'] }],
+    build: { flows: [] },
+  };
+  const imported = await j('POST', '/api/v1/features/imported-fuzefront/import', {
+    manifest, frames: { 'index.html': '<main>FuzeFront</main>' }, expectedStamp: null,
+  });
+  assert.equal(imported.status, 200);
+
+  const listed = await j('GET', `/api/v1/projects/${projectId}/features`);
+  assert.equal(listed.status, 200);
+  assert.ok(listed.body.items.some((item) => item.slug === 'imported-fuzefront'));
+});
+
 test('GET /api/v1/features (v0.1.0 list) is unpaginated {features:[...]}', async () => {
   const { status, body } = await j('GET', '/api/v1/features');
   assert.equal(status, 200);

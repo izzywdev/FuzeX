@@ -8,6 +8,7 @@
 import { query } from '../lib/db';
 import { mintId, toUuid, fromUuid, type EntityId } from '../lib/identity';
 import { NotFoundError } from '../lib/errors';
+import { ConflictError } from '../lib/errors';
 import type { ReqLogger } from '../lib/logger';
 import * as fileStore from '../lib/fileStore';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
@@ -64,6 +65,25 @@ export async function requireFeatureRowBySlug(slug: string, log: ReqLogger): Pro
     throw new NotFoundError(`feature '${slug}' not found`);
   }
   return findOrCreateFeatureBySlug(slug, log);
+}
+
+/** Attach a feature to the source-derived app workspace once, never silently move it. */
+export async function assignFeatureToProject(
+  featureId: string,
+  projectId: EntityId<'project'>,
+  log: ReqLogger
+): Promise<void> {
+  const { rows } = await query<FeatureRow>(
+    `update design_frames.feature
+     set project_id = $2
+     where id = $1 and (project_id is null or project_id = $2)
+     returning *`,
+    [featureId, toUuid(projectId)],
+    log
+  );
+  if (!rows[0]) {
+    throw new ConflictError('feature is already assigned to a different app workspace');
+  }
 }
 
 export function featureIdWire(row: FeatureRow): EntityId<'feature'> {
