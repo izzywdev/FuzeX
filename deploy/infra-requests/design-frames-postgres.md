@@ -63,11 +63,14 @@ backend: `services/design-frames-service/backend/`).
 
 ## Automated go-live sequence
 
-1. FuzeInfra's standard provisioning workflow seals the provider password and
-   enables `serviceDatabases.fuzex`; its shared Postgres provisioning Job creates
-   database/role. Dispatch `publish-sealed-handoff` with `id=fuzex-postgres`
-   to deliver the consumer ciphertext through a PR. Verify the hand-off and
-   database connectivity using FuzeInfra's verifier workflow.
+1. Dispatch FuzeX's no-input `request-postgres-provision.yml` workflow. It
+   sends FuzeX's bounded runtime declaration to FuzeInfra's generic
+   `provision-service-postgres` capability, which seals the provider password
+   and enables the matching declared allocation/handoff in one reviewed PR. Its
+   shared Postgres provisioning Job then creates the database/role. Dispatch
+   `publish-sealed-handoff` with `id=fuzex-postgres` to deliver the consumer
+   ciphertext through a PR. Verify the hand-off and database connectivity using
+   FuzeInfra's verifier workflow.
 2. A push to `services/design-frames-service/**` on `master` builds/publishes
    `ghcr.io/izzywdev/fuzex-design-frames-postgres-tier` and bumps its tag in
    `deploy/helm/fuzex/values-prod.yaml` (already wired by this PR).
