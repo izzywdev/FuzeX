@@ -52,7 +52,7 @@
 enabled: true
 
 image:
-  tag: "0c25a457f047"
+  tag: "1971f17dcf86"
   pullPolicy: Always
 
 # No imagePullSecrets. A prior revision of this file referenced a secret named
@@ -107,7 +107,7 @@ webappMfe:
     # 303e2020069c is the newest tag actually published for this package
     # (2026-09-01T12:37:27Z), and the same release also published
     # fuzex-design-frames-service:303e2020069c.
-    tag: "303e2020069c"
+    tag: "1971f17dcf86"
     pullPolicy: Always
 
 # =============================================================================
@@ -125,7 +125,7 @@ postgresTier:
   image:
     # POSTGRES_TIER_IMAGE_TAG — bumped by release.yml's postgres-tier build
     # job the same way image.tag above is bumped. DO NOT edit by hand.
-    tag: "0c25a457f047"
+    tag: "1971f17dcf86"
     pullPolicy: Always
 
 # Same-origin portal mount. WITHOUT THIS THE APP CANNOT LOAD IN THE PORTAL:
