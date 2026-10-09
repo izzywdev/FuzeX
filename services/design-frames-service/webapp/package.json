@@ -13,9 +13,10 @@
     "build": "vite build",
     "preview": "vite preview --port 4402",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.mjs"
+    "test": "node --test src/*.test.mjs src/components/*.test.mjs"
   },
   "dependencies": {
+    "@xyflow/react": "^12.9.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "@izzywdev/fuzefront-design-system": "^1.0.0"
