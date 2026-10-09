@@ -4,6 +4,7 @@ import { connectProjectRepository, getProjectWorkspace, listProjectFeatures } fr
 import type { FeatureSummary, ProjectWorkspace } from '../types'
 import { DesignSystemPanel } from './DesignSystemPanel'
 import { FlowGenerationPanel } from './FlowGenerationPanel'
+import { TraceabilityPanel } from './TraceabilityPanel'
 import { actionsStyle, errorMessage, gridStyle, panelStyle } from './workspaceStyles'
 
 export function AppWorkspace({ projectId, token, onBack, onSelect }: { projectId: string; token: string; onBack: () => void; onSelect: (slug: string) => void }) {
@@ -75,6 +76,7 @@ export function AppWorkspace({ projectId, token, onBack, onSelect }: { projectId
         <div style={actionsStyle}><Button onClick={() => onSelect(feature.slug)}>Review frames</Button><Button variant="secondary" onClick={() => setSelectedSlug(feature.slug)}>Generate flow here</Button></div>
       </article>)}</div>
       <DesignSystemPanel key={projectId} projectId={projectId} latest={workspace.designSystem} token={token} onChanged={(revision) => setWorkspace({ ...workspace, designSystem: revision })} />
+      <TraceabilityPanel projectId={projectId} token={token} />
       {features.length > 0 && <>
         <label>Generate in UX area<select value={selectedSlug} onChange={(e) => setSelectedSlug(e.target.value)} style={{ margin: '12px', padding: '8px' }}>{features.map((feature) => <option key={feature.slug} value={feature.slug}>{feature.name}</option>)}</select></label>
         {selectedSlug && <FlowGenerationPanel key={selectedSlug} slug={selectedSlug} token={token} onApplied={reload} />}

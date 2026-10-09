@@ -135,7 +135,7 @@ featuresRouter.get('/:slug', async (req, res) => {
   const featureRow = await featureRepo.findFeatureBySlug(req.params.slug, log(req));
   const latest = featureRow ? await latestApprovalsAsProjectionInput(featureRow.id, log(req)) : new Map();
   const manifest = projectManifest(feature.manifest, latest, computeStamp(feature));
-  res.status(200).json({ slug: req.params.slug, manifest, frames: Object.fromEntries(feature.frames) });
+  res.status(200).json({ slug: req.params.slug, projectId: featureRow?.project_id ? fromUuid('project', featureRow.project_id) : null, manifest, frames: Object.fromEntries(feature.frames) });
 });
 
 // A complete repository import is one content transaction. CAS prevents two

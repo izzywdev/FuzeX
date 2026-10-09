@@ -25,7 +25,7 @@ interface FeatureDetailProps {
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; manifest: Manifest }
+  | { status: 'ready'; manifest: Manifest; projectId: string | null }
 
 export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
@@ -43,8 +43,8 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
     setActionError(null)
     setRevision(null)
     getFeature(slug)
-      .then(({ manifest }) => {
-        setState({ status: 'ready', manifest })
+      .then(({ manifest, projectId }) => {
+        setState({ status: 'ready', manifest, projectId })
         setSelectedFrame(manifest.frames?.[0] ?? null)
       })
       .catch((err) =>
@@ -240,7 +240,7 @@ export function FeatureDetail({ slug, token, onBack }: FeatureDetailProps) {
           )}
 
           {revision && selectedFrame && (
-            <FrameDiscussionPanel slug={slug} stamp={revision.stamp} frame={selectedFrame} frameHtml={revision.frames[selectedFrame.file]} token={token} />
+            <FrameDiscussionPanel slug={slug} stamp={revision.stamp} frame={selectedFrame} frameHtml={revision.frames[selectedFrame.file]} token={token} projectId={state.status === 'ready' ? state.projectId : null} />
           )}
 
           {!revision && <h3

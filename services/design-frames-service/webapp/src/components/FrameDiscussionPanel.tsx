@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 
 import { Alert, Button, EmptyState, Input, Spinner, StatusPill, Textarea } from '@izzywdev/fuzefront-design-system'
 import { addDiscussionComment, createElementDiscussion, getDiscussion, listElementDiscussions, listRevisionFrameRefs, setDiscussionResolved } from '../api'
 import type { Discussion, DiscussionComment, DiscussionDetail, ManifestFrame } from '../types'
+import { TraceabilityPanel } from './TraceabilityPanel'
 
 interface FrameDiscussionPanelProps {
   slug: string
@@ -9,6 +10,7 @@ interface FrameDiscussionPanelProps {
   frame: ManifestFrame
   frameHtml?: string
   token: string
+  projectId: string | null
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -25,7 +27,7 @@ export function FrameDiscussionPanel(props: FrameDiscussionPanelProps) {
   return <FrameAnnotations key={`${props.slug}:${props.stamp}:${props.frame.file}`} {...props} />
 }
 
-function FrameAnnotations({ slug, stamp, frame, frameHtml, token }: FrameDiscussionPanelProps) {
+function FrameAnnotations({ slug, stamp, frame, frameHtml, token, projectId }: FrameDiscussionPanelProps) {
   const [discussions, setDiscussions] = useState<Discussion[]>([])
   const [selector, setSelector] = useState('body')
   const [feedback, setFeedback] = useState('')
@@ -223,6 +225,7 @@ function FrameAnnotations({ slug, stamp, frame, frameHtml, token }: FrameDiscuss
                 token={token}
                 onUpdate={(updated) => setDiscussions((items) => items.map((item) => item.id === updated.id ? updated : item))}
               />}
+              {projectId && frameRef && <TraceabilityPanel projectId={projectId} token={token} compact target={{ targetType: 'element', targetRef: frameRef, selector, contentStamp: stamp }} />}
             </>
           )}
         </>
