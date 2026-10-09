@@ -1,4 +1,4 @@
-import type { ContentRevision, Discussion, DiscussionComment, DiscussionDetail, DiscussionPage, FeatureSummary, Manifest, RevisionDetail, RevisionFrameRef, StampInfo, Page, Project, ProjectWorkspace, DesignSystemRevision, DesignSystemInput, GenerationBrief, GenerationSummary, GenerationDetail } from './types'
+import type { ContentRevision, Discussion, DiscussionComment, DiscussionDetail, DiscussionPage, FeatureSummary, Manifest, RevisionDetail, RevisionFrameRef, StampInfo, Page, Project, ProjectWorkspace, ProjectRepository, DesignSystemRevision, DesignSystemInput, GenerationBrief, GenerationSummary, GenerationDetail } from './types'
 
 // The portal-hosted MFE writes through FuzeFront's same-origin delegated proxy;
 // it obtains workload credentials server-side and never exposes them to the
@@ -180,6 +180,16 @@ export function getProjectWorkspace(projectId: string): Promise<ProjectWorkspace
 
 export function listProjectFeatures(projectId: string, cursor?: string): Promise<Page<FeatureSummary>> {
   return api(`/api/v1/projects/${encodeURIComponent(projectId)}/features?${pageQuery(cursor)}`)
+}
+
+export function listProjectRepositories(projectId: string): Promise<{ items: ProjectRepository[] }> {
+  return api(`/api/v1/projects/${encodeURIComponent(projectId)}/repositories`)
+}
+
+export function connectProjectRepository(projectId: string, repository: string, framesPath: string, token: string): Promise<ProjectRepository> {
+  return api(`/api/v1/projects/${encodeURIComponent(projectId)}/repositories`, {
+    method: 'POST', headers: authHeaders(token), body: JSON.stringify({ repository, framesPath }),
+  })
 }
 
 export function listDesignSystemRevisions(projectId: string, cursor?: string): Promise<Page<DesignSystemRevision>> {

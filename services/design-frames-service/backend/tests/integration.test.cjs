@@ -201,10 +201,17 @@ test('GET /api/v1/projects/:id/features lists the assigned feature, paginated', 
   assert.equal(body.items[0].slug, 'checkout-redesign');
 });
 
-test('repository import resolves source provenance into its portal app workspace', async () => {
+test('a database-managed repository connection adopts matching imported frames into its portal app workspace', async () => {
+  const connected = await j('POST', `/api/v1/projects/${projectId}/repositories`, {
+    repository: 'izzywdev/FuzeFront', framesPath: 'design/frames',
+  });
+  assert.equal(connected.status, 201);
+  assert.equal(connected.body.repository, 'izzywdev/FuzeFront');
+  assert.equal(connected.body.adoptedFeatures, 0);
+
   const manifest = {
     name: 'Imported FuzeFront frames', description: 'd', designSystem: 'fuse-seam',
-    entry: 'index.html', sourceRepo: 'FuzeFront',
+    entry: 'index.html', sourceRepo: 'izzywdev/FuzeFront',
     frames: [{ id: 'home', file: 'index.html', label: 'Home', summary: 's', testHooks: ['data-testid=home'] }],
     build: { flows: [] },
   };

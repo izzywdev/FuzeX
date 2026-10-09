@@ -89,6 +89,31 @@ projectsRouter.patch('/:id', async (req, res) => {
   res.status(200).json(patched);
 });
 
+// Repository connections are owned by the App workspace, not by an imported
+// manifest. Connecting one also adopts any previously imported frames carrying
+// matching provenance, so onboarding does not require re-importing a catalogue.
+projectsRouter.get('/:id/repositories', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  await projectRepo.getProject(id, log(req));
+  res.status(200).json({ items: await projectRepo.listProjectRepositories(id, log(req)) });
+});
+
+projectsRouter.post('/:id/repositories', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  await projectRepo.getProject(id, log(req));
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const allowed = new Set(['repository', 'framesPath']);
+  const unknown = Object.keys(body).filter((key) => !allowed.has(key));
+  const repository = typeof body.repository === 'string' ? body.repository.trim() : '';
+  const framesPath = typeof body.framesPath === 'string' ? body.framesPath.trim() : 'design/frames';
+  if (unknown.length || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !framesPath || framesPath.startsWith('/') || framesPath.includes('..')) {
+    throw new ValidationError('invalid repository connection', ['repository must be owner/repository; framesPath must be a relative path']);
+  }
+  const connected = await projectRepo.connectRepository(id, repository, framesPath, log(req));
+  const adoptedFeatures = await projectRepo.assignImportedFeaturesForRepository(id, repository, log(req));
+  res.status(201).json({ ...connected, adoptedFeatures });
+});
+
 // GET /api/v1/projects/:id/features
 projectsRouter.get('/:id/features', async (req, res) => {
   const id = assertRef('project', req.params.id) as EntityId<'project'>;
@@ -114,7 +139,18 @@ projectsRouter.get('/:id/workspace', async (req, res) => {
     frameCount += Array.isArray(manifest.frames) ? manifest.frames.length : 0;
   }
   const designSystem = await designSystemRepo.getDesignSystemRevision(id, null, log(req));
-  res.status(200).json({ project, featureCount: features.length, flowCount, frameCount, designSystem });
+  const repositories = await projectRepo.listProjectRepositories(id, log(req));
+  const detectedServices = new Map<string, { name: string; openapi: string; featureCount: number }>();
+  for (const feature of features) {
+    const manifest = await fileStore.getManifest(feature.slug);
+    const openapi = (manifest.contract as { openapi?: unknown } | undefined)?.openapi;
+    if (typeof openapi === 'string' && openapi.trim()) {
+      const name = openapi.split('/').filter(Boolean).at(-2) || openapi;
+      const prior = detectedServices.get(openapi);
+      detectedServices.set(openapi, { name, openapi, featureCount: (prior?.featureCount ?? 0) + 1 });
+    }
+  }
+  res.status(200).json({ project, repositories, detectedServices: [...detectedServices.values()], featureCount: features.length, flowCount, frameCount, designSystem });
 });
 
 projectsRouter.get('/:id/design-system', async (req, res) => {

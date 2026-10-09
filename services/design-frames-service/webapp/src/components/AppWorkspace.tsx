@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Button, StatusCallout } from '@izzywdev/fuzefront-design-system'
-import { getProjectWorkspace, listProjectFeatures } from '../api'
+import { connectProjectRepository, getProjectWorkspace, listProjectFeatures } from '../api'
 import type { FeatureSummary, ProjectWorkspace } from '../types'
 import { DesignSystemPanel } from './DesignSystemPanel'
 import { FlowGenerationPanel } from './FlowGenerationPanel'
@@ -13,6 +13,9 @@ export function AppWorkspace({ projectId, token, onBack, onSelect }: { projectId
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
+  const [repository, setRepository] = useState('')
+  const [framesPath, setFramesPath] = useState('design/frames')
+  const [connecting, setConnecting] = useState(false)
   const reload = useCallback(() => setRefresh((value) => value + 1), [])
 
   useEffect(() => {
@@ -42,8 +45,27 @@ export function AppWorkspace({ projectId, token, onBack, onSelect }: { projectId
     {error && <StatusCallout tone="error" title="Cannot load app workspace">{error}</StatusCallout>}
     {workspace && <>
       <h2 id="app-workspace-heading">{workspace.project.name}</h2>
-      <p>{workspace.project.description}</p><p>{workspace.project.sourceRepo}</p>
+      <p>{workspace.project.description}</p>
       <p>{workspace.featureCount} UX areas · {workspace.flowCount} flows · {workspace.frameCount} frames</p>
+      <section style={panelStyle} aria-labelledby="connected-repositories-heading">
+        <h3 id="connected-repositories-heading">Connected repositories</h3>
+        {workspace.repositories.length === 0 && <p>Connect a repository to adopt matching imported frames and make future imports appear in this app.</p>}
+        {workspace.repositories.length > 0 && <ul>{workspace.repositories.map((item) => <li key={item.repository}><code>{item.repository}</code> · {item.framesPath}</li>)}</ul>}
+        <form onSubmit={(event) => {
+          event.preventDefault(); setConnecting(true); setError('')
+          connectProjectRepository(projectId, repository.trim(), framesPath.trim(), token)
+            .then(() => { setRepository(''); reload() })
+            .catch((err) => setError(errorMessage(err))).finally(() => setConnecting(false))
+        }}>
+          <label>Repository<input required placeholder="izzywdev/FuzeFront" value={repository} onChange={(event) => setRepository(event.target.value)} style={{ margin: '8px', padding: '8px' }} /></label>
+          <label>Frames path<input required value={framesPath} onChange={(event) => setFramesPath(event.target.value)} style={{ margin: '8px', padding: '8px' }} /></label>
+          <Button type="submit" disabled={connecting}>{connecting ? 'Connecting…' : 'Connect repository'}</Button>
+        </form>
+      </section>
+      <section style={panelStyle} aria-labelledby="detected-services-heading">
+        <h3 id="detected-services-heading">Detected services</h3>
+        {workspace.detectedServices.length === 0 ? <p>Services are detected from imported flow contracts after a connected repository publishes its frames.</p> : <ul>{workspace.detectedServices.map((service) => <li key={service.openapi}><code>{service.name}</code> · {service.featureCount} UX area{service.featureCount === 1 ? '' : 's'}</li>)}</ul>}
+      </section>
       <h3>UX areas & flows</h3>
       {features.length === 0 && <p>No UX areas are linked to this app yet. Import frames into this workspace to begin review and generation.</p>}
       <div style={gridStyle}>{features.map((feature) => <article key={feature.slug} style={panelStyle}>
