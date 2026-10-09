@@ -17,7 +17,7 @@ import * as frameRefRepo from '../repositories/frameRefRepo';
 import { ConflictError, ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
-import { authenticatedActor } from '../middleware/auth';
+import { authenticatedActor, authenticatedEventContext, type AuthenticatedRequest } from '../middleware/auth';
 
 export const featuresRouter = Router();
 
@@ -291,7 +291,7 @@ featuresRouter.post('/:slug/flows/:flowId/approve', async (req, res) => {
   const decidedAt = new Date();
   const row = await fileStore.withCurrentRevision(slug, contentStamp,
     async (_feature, stamp) => approvalRepo.insertApproval(
-      { flowId: flow.id, decision: 'approve', actorRef, actorType, contentStamp: stamp, reason: null }, log(req)
+      { flowId: flow.id, decision: 'approve', actorRef, actorType, contentStamp: stamp, reason: null }, log(req), authenticatedEventContext(req as AuthenticatedRequest)
     ),
     { flowKey, value: { approved: true, approvedBy: actorRef, approvedAt: decidedAt.toISOString(), rejectionReason: null } }
   );
@@ -325,7 +325,7 @@ featuresRouter.post('/:slug/flows/:flowId/reject', async (req, res) => {
   const reason = body.reason;
   const row = await fileStore.withCurrentRevision(slug, contentStamp,
     async (_feature, stamp) => approvalRepo.insertApproval(
-      { flowId: flow.id, decision: 'reject', actorRef, actorType, contentStamp: stamp, reason }, log(req)
+      { flowId: flow.id, decision: 'reject', actorRef, actorType, contentStamp: stamp, reason }, log(req), authenticatedEventContext(req as AuthenticatedRequest)
     ),
     { flowKey, value: { approved: false, approvedBy: null, approvedAt: null, rejectionReason: reason } }
   );

@@ -7,7 +7,7 @@ import { assertRef, toUuid, type EntityId } from '../lib/identity';
 import { ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
-import { authenticatedActor, type AuthenticatedRequest } from '../middleware/auth';
+import { authenticatedActor, authenticatedEventContext, type AuthenticatedRequest } from '../middleware/auth';
 import * as designSystemRepo from '../repositories/designSystemRepo';
 import * as fileStore from '../lib/fileStore';
 import { parseDesignSystemRevision, parseRevisionNumber } from '../lib/designSystem';
@@ -48,7 +48,7 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
 
   const created = await projectRepo.createProject(
     { name: body.name as string, description: (body.description as string | null) ?? null, sourceRepo: (body.sourceRepo as string | null) ?? null },
-    log(req)
+    log(req), authenticatedEventContext(req as AuthenticatedRequest)
   );
   res.status(201).json(created);
 });
@@ -86,7 +86,7 @@ projectsRouter.patch('/:id', async (req, res) => {
       description: body.description as string | null | undefined,
       sourceRepo: body.sourceRepo as string | null | undefined,
     },
-    log(req)
+    log(req), authenticatedEventContext(req as AuthenticatedRequest)
   );
   res.status(200).json(patched);
 });
@@ -111,7 +111,7 @@ projectsRouter.post('/:id/repositories', async (req, res) => {
   if (unknown.length || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !framesPath || framesPath.startsWith('/') || framesPath.includes('..')) {
     throw new ValidationError('invalid repository connection', ['repository must be owner/repository; framesPath must be a relative path']);
   }
-  const connected = await projectRepo.connectRepository(id, repository, framesPath, log(req));
+  const connected = await projectRepo.connectRepository(id, repository, framesPath, log(req), authenticatedEventContext(req as AuthenticatedRequest));
   const adoptedFeatures = await projectRepo.assignImportedFeaturesForRepository(id, repository, log(req));
   res.status(201).json({ ...connected, adoptedFeatures });
 });
@@ -139,7 +139,7 @@ projectsRouter.post('/:id/flows', async (req: AuthenticatedRequest, res) => {
   const id = assertRef('project', req.params.id) as EntityId<'project'>;
   const actor = authenticatedActor(req).actorRef;
   if (!actor) throw new UnauthorizedError('a verified caller is required');
-  const created = await nativeFlowRepo.createNativeFlow(id, parseNativeFlowCreate(req.body), actor, log(req));
+  const created = await nativeFlowRepo.createNativeFlow(id, parseNativeFlowCreate(req.body), actor, log(req), authenticatedEventContext(req));
   res.status(201).json(created);
 });
 
@@ -166,7 +166,7 @@ projectsRouter.post('/:id/flows/:flowId/revisions', async (req: AuthenticatedReq
   const flowId = assertRef('flow', req.params.flowId) as EntityId<'flow'>;
   const actor = authenticatedActor(req).actorRef;
   if (!actor) throw new UnauthorizedError('a verified caller is required');
-  res.status(201).json(await nativeFlowRepo.appendNativeFlowRevision(projectId, flowId, parseNativeFlowRevision(req.body), actor, log(req)));
+  res.status(201).json(await nativeFlowRepo.appendNativeFlowRevision(projectId, flowId, parseNativeFlowRevision(req.body), actor, log(req), authenticatedEventContext(req)));
 });
 
 // Projects are the hosted application workspaces. Counts use the authoritative
@@ -227,5 +227,5 @@ projectsRouter.post('/:id/design-system/revisions', async (req: AuthenticatedReq
   const input = parseDesignSystemRevision(req.body);
   const actor = authenticatedActor(req).actorRef;
   if (!actor) throw new UnauthorizedError('a verified caller is required');
-  res.status(201).json(await designSystemRepo.createDesignSystemRevision(id, input, actor, log(req)));
+  res.status(201).json(await designSystemRepo.createDesignSystemRevision(id, input, actor, log(req), authenticatedEventContext(req)));
 });
