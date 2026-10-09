@@ -69,6 +69,11 @@ async function run() {
   ]), null);
   assert.strictEqual(computeStamp(first), first.stamp, 'revision hashes its exact stored bytes');
   assert.strictEqual(first.metadata.sourceStamp, imported.sourceStamp, 'source provenance is retained');
+  const unchanged = await store.importFeature('imported-feature', imported, new Map([
+    ['index.html', '<p>first</p>'], ['removed.html', '<p>removed later</p>'],
+  ]), first.stamp);
+  assert.strictEqual(unchanged.stamp, first.stamp, 'an unchanged re-import resolves to the same content-addressed revision');
+  assert.strictEqual((await store.listRevisions('imported-feature')).length, 1, 'an unchanged re-import does not duplicate an immutable revision');
   const second = await store.importFeature('imported-feature', imported, new Map([['index.html', '<p>second</p>']]), first.stamp);
   assert.strictEqual((await store.getFeature('imported-feature')).frames.has('removed.html'), false, 'full imports remove stale frames');
   assert.strictEqual((await store.getRevision('imported-feature', first.stamp)).frames.get('removed.html'), '<p>removed later</p>', 'removed frames remain historical');

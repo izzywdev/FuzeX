@@ -2,15 +2,11 @@
 /**
  * design-frames-client.mjs — the installable client package for design-frames-service.
  *
- * Frames are authored and version-controlled in EACH CONSUMING REPO, exactly like a
- * `.fig` file lives with the project that uses it — this service never becomes their
- * storage. What it owns is their LIFECYCLE: per-flow approval/reject and a navigable
- * review site. A consuming repo installs this client (copy this file into its own
- * `scripts/`, or `import` it if the repo can depend on this package directly), authors
- * `design/frames/<feature>/**` locally as always, then SYNCS the current content here
- * so design-frames-service can track its lifecycle and serve the navigable review site.
- * Re-run `sync` after any local edit — this is not a one-time migration, it's a
- * publish step, the same way you'd re-push a `.fig` file after editing it locally.
+ * This client imports legacy, repository-hosted static frame sets into FuzeX. It is
+ * deliberately filesystem/repository based rather than a GitHub-Pages scraper: the
+ * importer receives the original manifest, flow mapping and source snapshot, while
+ * avoiding an SSRF-capable API. Once imported, FuzeX owns subsequent UX authoring and
+ * revisions; this utility is a migration/adoption tool, not a Git publishing loop.
  *
  * Node stdlib `fetch` only, no dependency — mirrors bridge-server.js's dependency-light
  * convention.
@@ -23,12 +19,13 @@
  *   node design-frames-client.mjs list
  *   node design-frames-client.mjs get <slug>
  *   node design-frames-client.mjs stamp <slug>
- *   node design-frames-client.mjs sync <slug> <localFeatureDir> [sourceRepo]
+ *   node design-frames-client.mjs import <slug> <localFeatureDir> [sourceRepo]
+ *   node design-frames-client.mjs import-all <framesRoot> [sourceRepo]
  *   node design-frames-client.mjs approve <slug> <flowId> <approvedBy>
  *   node design-frames-client.mjs reject <slug> <flowId> <notes>
  *
  * Also usable as a module:
- *   import { listFeatures, getFeature, syncFeature, approveFlow } from './design-frames-client.mjs';
+ *   import { listFeatures, getFeature, importFeature, approveFlow } from './design-frames-client.mjs';
  */
 
 function baseUrl() {
@@ -73,6 +70,25 @@ export function siteUrl(slug, file) {
   return file
     ? `${baseUrl()}/site/${encodeURIComponent(slug)}/${encodeURIComponent(file)}`
     : `${baseUrl()}/site/${encodeURIComponent(slug)}`;
+}
+
+/**
+ * A FuzeX App repository connection is stored as `owner/repository`. Legacy
+ * runbooks frequently used a GitHub clone or web URL, which preserved display
+ * provenance but silently prevented the imported feature from joining the
+ * database-managed App. Accept those safe GitHub spellings at the importer
+ * boundary and persist the canonical connection key instead.
+ *
+ * Unknown providers are left untouched as provenance: the API never fetches
+ * them, and an App can only adopt a value that matches an explicit connection.
+ */
+export function canonicalRepositoryRef(value) {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(raw)) return raw;
+  const github = raw.match(/^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?(?:[?#].*)?$/i);
+  return github ? `${github[1]}/${github[2]}` : raw;
 }
 
 // ---- writes (require DESIGN_FRAMES_API_TOKEN) -------------------------------
@@ -130,7 +146,7 @@ export async function rejectFlow(slug, flowId, notes, contentStamp) {
  * filesystem/repository based rather than fetching arbitrary URLs: it imports
  * the authoritative manifest and source HTML, preserves provenance, and avoids
  * turning the hosted API into an SSRF-capable GitHub proxy. */
-export async function syncFrameDirectory(framesRoot, { sourceRepo, continueOnError = true } = {}) {
+export async function importFrameDirectory(framesRoot, { sourceRepo, continueOnError = true } = {}) {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const results = [];
@@ -143,7 +159,7 @@ export async function syncFrameDirectory(framesRoot, { sourceRepo, continueOnErr
       continue;
     }
     try {
-      results.push({ ...(await syncFeature(entry.name, localDir, { sourceRepo })), status: 'imported' });
+      results.push({ ...(await importFeature(entry.name, localDir, { sourceRepo })), status: 'imported' });
     } catch (err) {
       if (!continueOnError) throw err;
       results.push({ slug: entry.name, status: 'failed', error: err.message, httpStatus: err.status ?? null });
@@ -157,7 +173,7 @@ export async function syncFrameDirectory(framesRoot, { sourceRepo, continueOnErr
  * design-frames-service in one complete, compare-and-swap import. It publishes
  * exactly the source frame set and commits its immutable hosted revision.
  */
-export async function syncFeature(slug, localDir, { sourceRepo } = {}) {
+export async function importFeature(slug, localDir, { sourceRepo } = {}) {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
 
@@ -167,7 +183,7 @@ export async function syncFeature(slug, localDir, { sourceRepo } = {}) {
   const sourceStamp = await stampSourceFiles(sourceFiles, manifest);
   // A connected repository is addressed canonically as owner/repository. CI
   // supplies it automatically, while local users can pass it explicitly.
-  const resolvedSourceRepo = sourceRepo || manifest.sourceRepo || process.env.GITHUB_REPOSITORY || null;
+  const resolvedSourceRepo = canonicalRepositoryRef(sourceRepo || manifest.sourceRepo || process.env.GITHUB_REPOSITORY);
   let expectedStamp = null;
   try { expectedStamp = (await getStamp(slug)).stamp; } catch (err) {
     if (err.status !== 404) throw err;
@@ -187,6 +203,12 @@ export async function syncFeature(slug, localDir, { sourceRepo } = {}) {
   });
   return { slug, stamp, sourceStamp, framesSynced: files.size, siteUrl: siteUrl(slug) };
 }
+
+// Compatibility aliases for adoption jobs created before FuzeX became the
+// authoring system of record. New callers should use importFeature and
+// importFrameDirectory to avoid implying a continuing Git source of truth.
+export const syncFeature = importFeature;
+export const syncFrameDirectory = importFrameDirectory;
 
 async function readSourceSnapshot(fs, path, localDir) {
   const files = new Map();
@@ -289,16 +311,18 @@ async function main() {
         console.log(JSON.stringify(await getStamp(args[0]), null, 2));
         break;
       }
+      case 'import':
       case 'sync': {
         const [slug, localDir, sourceRepo] = args;
-        if (!slug || !localDir) throw new Error('usage: sync <slug> <localFeatureDir> [sourceRepo]');
-        console.log(JSON.stringify(await syncFeature(slug, localDir, { sourceRepo }), null, 2));
+        if (!slug || !localDir) throw new Error('usage: import <slug> <localFeatureDir> [sourceRepo]');
+        console.log(JSON.stringify(await importFeature(slug, localDir, { sourceRepo }), null, 2));
         break;
       }
+      case 'import-all':
       case 'sync-all': {
         const [framesRoot, sourceRepo] = args;
-        if (!framesRoot) throw new Error('usage: sync-all <design/frames directory> [sourceRepo]');
-        const results = await syncFrameDirectory(framesRoot, { sourceRepo });
+        if (!framesRoot) throw new Error('usage: import-all <design/frames directory> [sourceRepo]');
+        const results = await importFrameDirectory(framesRoot, { sourceRepo });
         console.log(JSON.stringify(results, null, 2));
         if (results.some((result) => result.status === 'failed')) process.exitCode = 1;
         break;
@@ -316,7 +340,7 @@ async function main() {
         break;
       }
       default:
-        console.error('usage: design-frames-client.mjs (list | get <slug> | stamp <slug> | sync <slug> <localFeatureDir> [sourceRepo] | sync-all <design/frames directory> [sourceRepo] | approve <slug> <flowId> <approvedBy> | reject <slug> <flowId> <reason>)');
+        console.error('usage: design-frames-client.mjs (list | get <slug> | stamp <slug> | import <slug> <localFeatureDir> [sourceRepo] | import-all <design/frames directory> [sourceRepo] | approve <slug> <flowId> <approvedBy> | reject <slug> <flowId> <reason>)');
         process.exit(2);
     }
   } catch (err) {

@@ -1,26 +1,18 @@
 # design-frames-service
 
-FuzeX's product for the **lifecycle** of navigable HTML design frames — per-flow
-approval/reject and a navigable review site — consumable over **REST**, **MCP**, and
-**A2A**. Modeled on FuzeFront's `design/frames/**` pipeline (see
-[`docs/EXTRACTION.md`](./docs/EXTRACTION.md)), reimplemented here as a real, shared
-backend so any product can drive design review against it — but the frames themselves
-are **not authored or stored here as this repo's own files**. See
-[`skills/design-frames-lifecycle/SKILL.md`](./skills/design-frames-lifecycle/SKILL.md)
-for the full story; the short version is next.
+FuzeX's product for the **authoring, lifecycle, and review** of navigable HTML design
+frames — per-flow approval/reject and a navigable review site — consumable over
+**REST**, **MCP**, and **A2A**. It imports legacy FuzeFront GitHub Pages artifacts
+(see [`docs/EXTRACTION.md`](./docs/EXTRACTION.md)) but is the system of record once
+they are adopted.
 
-## Frames are data, not this repo's content
+## Frames are data, owned by FuzeX after adoption
 
-Treat a feature's navigable HTML frames the way you'd treat a `.fig` file: it's
-authored and version-controlled in the product repo that owns the feature —
-`design/frames/<feature>/` in FuzeFront, or wherever the equivalent lives in another
-product's repo — never inside `izzywdev/FuzeX` itself. This service ingests that
-content (via its client package, `client/design-frames-client.mjs`, or directly over
-the REST/MCP API) and becomes the system of record for its **lifecycle** — per-flow
-approval/reject bound to a content stamp, and a navigable review site — the same way a
-design tool becomes the system of record for a file's review state without becoming
-the only place that file exists. Content is re-synced from the owning repo whenever it
-changes; approval/reject state and the review site live here.
+The importer accepts a local checkout of an old static frame set because it retains
+the original manifest, flow mapping and source-content hash without fetching arbitrary
+URLs. That source is immutable provenance only. After adoption, FuzeX owns the frame
+artifact, revisions, review decisions, annotations, and future authoring; GitHub Pages
+and Git are no longer a design authoring or source-of-truth path.
 
 ## Import existing GitHub Pages frame sets
 
@@ -32,8 +24,8 @@ revision, then run:
 ```bash
 DESIGN_FRAMES_SERVICE_URL=https://fuzex.example.com \
 DESIGN_FRAMES_API_TOKEN=… \
-node client/design-frames-client.mjs sync-all /path/to/FuzeFront/design/frames \
-  https://github.com/izzywdev/FuzeFront
+node client/design-frames-client.mjs import-all /path/to/FuzeFront/design/frames \
+  izzywdev/FuzeFront
 ```
 
 The importer reads the original repository files into one source snapshot,
@@ -63,7 +55,7 @@ removing it. Working generations are retained for in-flight readers; storage
 retention must preserve immutable revisions and coordinate any working-generation
 cleanup with readers.
 
-## What it replaces (and what it doesn't — yet)
+## What it replaces
 
 FuzeFront's original pipeline authored frames as files directly in its own repo
 (`design/frames/<feature>/`), stamped them with a content hash
@@ -75,11 +67,12 @@ approval, a navigable review site — as a real backend with a REST API, so appr
 state (and the review UI) live in one shared place instead of being reinvented per
 repo.
 
-**FuzeFront's 14 existing `design/frames/<feature>/` directories, and every new one it
-creates, stay in FuzeFront's own repo** — nothing migrates. Any product — FuzeFront or
-otherwise — installs the [`design-frames-lifecycle`](./skills/design-frames-lifecycle/SKILL.md)
-skill and its client package to sync locally-authored frames here for approval/reject
-tracking and navigability.
+The importer is a one-time adoption path for those legacy static frame sets. It keeps
+their source repository and source-content stamp as immutable provenance, but the
+imported artifact, subsequent revisions, reviews, annotations, and Design System
+decisions are owned by FuzeX. Repository URLs are normalized to the canonical
+`owner/repository` form so an import joins an explicitly database-managed App connection;
+the importer never creates an App from a manifest.
 
 ## Run it
 

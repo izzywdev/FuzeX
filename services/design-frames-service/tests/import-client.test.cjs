@@ -72,3 +72,31 @@ test('repository importer rejects source links that leave the selected tree', as
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('repository importer canonicalizes GitHub provenance so imported frames adopt their connected App', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'fuzex-import-canonical-repository-'));
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.DESIGN_FRAMES_SERVICE_URL;
+  try {
+    await fs.writeFile(path.join(directory, 'manifest.json'), JSON.stringify({
+      name: 'Example', description: 'Example', designSystem: 'example', entry: 'index.html', frames: [], build: { flows: [] },
+    }));
+    await fs.writeFile(path.join(directory, 'index.html'), '<p>Frame</p>');
+    process.env.DESIGN_FRAMES_SERVICE_URL = 'https://test.invalid';
+    global.fetch = async (url, options = {}) => {
+      if (url.endsWith('/stamp')) return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+      const body = JSON.parse(options.body);
+      assert.equal(body.manifest.sourceRepo, 'izzywdev/FuzeFront');
+      return new Response(JSON.stringify({ stamp: 'b'.repeat(64) }));
+    };
+    const client = await import('../client/design-frames-client.mjs');
+    assert.equal(client.canonicalRepositoryRef('https://github.com/izzywdev/FuzeFront.git'), 'izzywdev/FuzeFront');
+    assert.equal(client.canonicalRepositoryRef('git@github.com:izzywdev/FuzeFront.git'), 'izzywdev/FuzeFront');
+    await client.importFeature('example', directory, { sourceRepo: 'https://github.com/izzywdev/FuzeFront.git' });
+  } finally {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.DESIGN_FRAMES_SERVICE_URL;
+    else process.env.DESIGN_FRAMES_SERVICE_URL = originalUrl;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
