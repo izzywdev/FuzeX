@@ -39,4 +39,8 @@ test('S3-compatible storage adapter is injected and never requires browser crede
   assert.equal((await store.getObject('private/key')).contentType, 'text/plain');
   assert.deepEqual(calls.map(([op]) => op), ['put', 'head', 'get']);
   assert.throws(() => artifactStorageConfigFromEnv({ ARTIFACT_STORAGE_PROVIDER: 's3', ARTIFACT_STORAGE_BUCKET: 'b', ARTIFACT_STORAGE_REGION: 'r', ARTIFACT_STORAGE_ENDPOINT: 'http://minio' }), /https/);
+  assert.deepEqual(
+    artifactStorageConfigFromEnv({ ARTIFACT_STORAGE_CONFIG: JSON.stringify({ provider: 's3', bucket: 'private-fuzex', region: 'eu', endpoint: 'https://minio.internal', accessKey: 'not-returned' }) }),
+    { provider: 's3', bucket: 'private-fuzex', region: 'eu', endpoint: 'https://minio.internal' }
+  );
 });

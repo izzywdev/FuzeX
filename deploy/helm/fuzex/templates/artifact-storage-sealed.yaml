@@ -1,0 +1,21 @@
+{{- /* Ciphertext is published only by FuzeInfra handoff fuzex-artifact-storage. */ -}}
+{{- $raw := .Files.Get "files/secrets/artifact-storage-sealed.yaml" -}}
+{{- if $raw -}}
+{{- $secret := $raw | fromYaml -}}
+{{- if or (ne $secret.apiVersion "bitnami.com/v1alpha1") (ne $secret.kind "SealedSecret") -}}
+{{- fail "artifact-storage handoff must contain a SealedSecret" -}}
+{{- end -}}
+{{- if or (ne $secret.metadata.namespace .Release.Namespace) (ne $secret.metadata.name .Values.artifactStorage.secret.name) -}}
+{{- fail "artifact-storage handoff scope must match its configured Secret" -}}
+{{- end -}}
+{{- if or (hasKey $secret.spec "data") (hasKey $secret.spec "stringData") (hasKey $secret.spec.template "data") (hasKey $secret.spec.template "stringData") -}}
+{{- fail "artifact-storage handoff must contain ciphertext only" -}}
+{{- end -}}
+{{- if not (get $secret.spec.encryptedData .Values.artifactStorage.secret.key) -}}
+{{- fail "artifact-storage handoff is missing its configured encrypted key" -}}
+{{- end -}}
+{{- $annotations := default (dict) $secret.metadata.annotations -}}
+{{- $_ := set $annotations "argocd.argoproj.io/sync-wave" "-2" -}}
+{{- $_ := set $secret.metadata "annotations" $annotations -}}
+{{- toYaml $secret -}}
+{{- end -}}

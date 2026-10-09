@@ -110,6 +110,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.postgresTier.databaseSecret.name | quote }}
                   key: {{ .Values.postgresTier.databaseSecret.key | quote }}
+            {{- if .Values.artifactStorage.enabled }}
+            - name: ARTIFACT_STORAGE_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.artifactStorage.secret.name | quote }}
+                  key: {{ .Values.artifactStorage.secret.key | quote }}
+            {{- end }}
           readinessProbe:
             httpGet: { path: /ready, port: http }
             initialDelaySeconds: 3

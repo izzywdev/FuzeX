@@ -208,6 +208,15 @@ postgresTier:
       requests: { cpu: 10m, memory: 32Mi }
       limits: { cpu: 200m, memory: 128Mi }
 
+# FuzeInfra owns all S3/MinIO provisioning and sends an opaque JSON runtime
+# contract through its generic sealed handoff. FuzeX never receives the shared
+# infrastructure/Contabo credential and never provisions buckets itself.
+artifactStorage:
+  enabled: false
+  secret:
+    name: fuzex-artifact-storage
+    key: ARTIFACT_STORAGE_CONFIG
+
 # -- federatedMount: the SAME-ORIGIN portal mount for the Module-Federation
 # remote. This is a DIFFERENT surface from `ingress` above (a public origin for
 # the mobile/standalone case): it exposes the remote under the FuzeFront HOST
