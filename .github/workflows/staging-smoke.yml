@@ -1,0 +1,52 @@
+name: FuzeX staging smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      mutation:
+        description: 'Run the dedicated staging import/revision/approval fixture (writes only that fixture)'
+        required: true
+        type: boolean
+        default: false
+      rollback_stamp:
+        description: 'Optional immutable content stamp to verify after a rollback/restart'
+        required: false
+        type: string
+      rollback_frame_sha256:
+        description: 'Optional SHA-256 evidence for index.html at rollback_stamp'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzex-staging-smoke
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    # This environment is the approval boundary for the staging-only workload
+    # credential. No token is printed, persisted, or made available to PR runs.
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FUZE_X_SMOKE_BASE_URL: ${{ secrets.FUZE_X_STAGING_API_BASE_URL }}
+      FUZE_X_SMOKE_BEARER_TOKEN: ${{ secrets.FUZE_X_STAGING_SMOKE_TOKEN }}
+      FUZE_X_SMOKE_DELEGATION_TOKEN: ${{ secrets.FUZE_X_STAGING_DELEGATION_TOKEN }}
+      FUZE_X_SMOKE_FEATURE_SLUG: fuzex-staging-smoke
+      FUZE_X_SMOKE_ROLLBACK_STAMP: ${{ inputs.rollback_stamp }}
+      FUZE_X_SMOKE_ROLLBACK_FRAME_SHA256: ${{ inputs.rollback_frame_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify same-origin health and readiness
+        run: node scripts/fuzex-staging-smoke.mjs
+      - name: Verify dedicated immutable import, revision and approval path
+        if: inputs.mutation
+        env:
+          FUZE_X_SMOKE_ALLOW_MUTATION: dedicated-staging-fixture
+        run: node scripts/fuzex-staging-smoke.mjs --mutation
+      - name: Verify historical revision survives rollback/restart
+        if: inputs.rollback_stamp != ''
+        run: node scripts/fuzex-staging-smoke.mjs --rollback
