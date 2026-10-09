@@ -8,7 +8,7 @@ import type { ClientConfig, QueryConfig } from 'pg';
 import { requestLogger } from './lib/logger';
 import { getPool } from './lib/db';
 import { DATA_DIR, getFrame } from './lib/fileStore';
-import { requireAuthForWrites } from './middleware/auth';
+import { requireAuthForWrites, requireFuzeFrontAuthorization } from './middleware/auth';
 import { errorHandler } from './lib/errors';
 import { projectsRouter } from './routes/projects';
 import { featuresRouter } from './routes/features';
@@ -92,6 +92,10 @@ export function createApp() {
   });
 
   app.use(requireAuthForWrites);
+  // Every product API operation is an authorization decision at FuzeFront
+  // Security. Health and the separately sandboxed preview endpoint stay out of
+  // this mount intentionally; previews never receive browser credentials.
+  app.use('/api/v1', requireFuzeFrontAuthorization);
 
   app.use('/api/v1/features', featureDiscussionsRouter); // GET /:slug/discussions convenience, matched first
   app.use('/api/v1/features', generationsRouter);

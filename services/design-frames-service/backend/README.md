@@ -103,10 +103,20 @@ The delegation requires `fuzex:frames:read` for reads and
 `DESIGN_FRAMES_REQUIRED_SCOPE` (default `fuzex:frames:write`) for mutations.
 Malformed, inactive, mismatched or unverifiable credentials fail closed.
 
-Existing anonymous reads remain available. Supplying a delegation makes its
-validation mandatory even for a read; it never falls back to anonymous access.
-CLI/service writes may continue to use their verified machine bearer with the
-write scope. A delegation token by itself is not a machine credential.
+Every `/api/v1/**` request is then authorized by FuzeFront Security's stable
+`POST /api/v1/security/authz/check` contract. FuzeX submits the verified
+delegated user (or a verified automation service), the tenant, and a stable
+`fuzex.DesignWorkspace` resource/action tuple. It stores no roles, ACLs, or
+authorization decisions and does not call a policy vendor directly. A denied,
+unreachable, malformed, or non-200 decision is a `403`; a missing tenant-bound
+identity is a `401`. Product policy and grants therefore remain entirely in
+FuzeFront Security's provider-backed decision path.
+
+The sandboxed `/site/**` preview route is deliberately outside the API mount.
+The federated UI never puts a bearer token in a preview URL or iframe, and the
+FuzeFront proxy must never forward browser/session credentials to a preview.
+CLI/service callers may use a verified machine bearer with the appropriate
+scope and a tenant; a delegation token by itself is not a machine credential.
 
 Approvals, comments, design-system revisions and generation drafts attribute
 their actor to the verified delegated user (`user`) or machine (`agent`).
