@@ -18,6 +18,7 @@ export interface FeatureRow {
   id: string;
   slug: string;
   project_id: string | null;
+  source_repo: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -32,12 +33,13 @@ export async function findFeatureBySlug(slug: string, log: ReqLogger): Promise<F
 export async function createFeatureRow(
   slug: string,
   projectId: EntityId<'project'> | null,
+  sourceRepo: string | null,
   log: ReqLogger
 ): Promise<FeatureRow> {
   const id = mintId('feature');
   const { rows } = await query<FeatureRow>(
-    `insert into design_frames.feature (id, slug, project_id) values ($1, $2, $3) returning *`,
-    [toUuid(id), slug, projectId ? toUuid(projectId) : null],
+    `insert into design_frames.feature (id, slug, project_id, source_repo) values ($1, $2, $3, $4) returning *`,
+    [toUuid(id), slug, projectId ? toUuid(projectId) : null, sourceRepo],
     log
   );
   return rows[0];
@@ -48,7 +50,7 @@ export async function findOrCreateFeatureBySlug(slug: string, log: ReqLogger): P
   const existing = await findFeatureBySlug(slug, log);
   if (existing) return existing;
   try {
-    return await createFeatureRow(slug, null, log);
+    return await createFeatureRow(slug, null, null, log);
   } catch (err) {
     if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
       const retry = await findFeatureBySlug(slug, log);
@@ -56,6 +58,10 @@ export async function findOrCreateFeatureBySlug(slug: string, log: ReqLogger): P
     }
     throw err;
   }
+}
+
+export async function setFeatureSourceRepo(featureId: string, sourceRepo: string | null, log: ReqLogger): Promise<void> {
+  await query(`update design_frames.feature set source_repo = $2 where id = $1`, [featureId, sourceRepo], log);
 }
 
 export async function requireFeatureRowBySlug(slug: string, log: ReqLogger): Promise<FeatureRow> {

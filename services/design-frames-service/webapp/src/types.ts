@@ -173,10 +173,25 @@ export interface DesignSystemInput {
 
 export interface ProjectWorkspace {
   project: Project
+  repositories: ProjectRepository[]
+  detectedServices: DetectedService[]
   featureCount: number
   flowCount: number
   frameCount: number
   designSystem: DesignSystemRevision | null
+}
+
+export interface ProjectRepository {
+  repository: string
+  framesPath: string
+  createdAt: string
+  adoptedFeatures?: number
+}
+
+export interface DetectedService {
+  name: string
+  openapi: string
+  featureCount: number
 }
 
 export interface GenerationBrief {

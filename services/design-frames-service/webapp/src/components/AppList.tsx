@@ -14,7 +14,6 @@ export function AppList({ token, onSelect, onSelectFeature }: { token: string; o
   const [busy, setBusy] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [sourceRepo, setSourceRepo] = useState('')
 
   async function load(next?: string) {
     setLoading(true); setError('')
@@ -39,17 +38,17 @@ export function AppList({ token, onSelect, onSelectFeature }: { token: string; o
         <Button onClick={() => onSelect(project.id)}>Open app workspace</Button>
       </article>)}</div>
       {cursor && <Button variant="secondary" disabled={loading} onClick={() => void load(cursor)}>Load more apps</Button>}
-      <div style={actionsStyle}><Button variant="secondary" disabled={!token.trim() || busy} onClick={() => setCreating(!creating)}>{creating ? 'Cancel new app' : 'Add app'}</Button></div>
+      <div style={actionsStyle}><Button variant="secondary" disabled={busy} onClick={() => setCreating(!creating)}>{creating ? 'Cancel new app' : 'Add app'}</Button></div>
       {creating && <form style={panelStyle} onSubmit={(e) => {
         e.preventDefault(); setBusy(true); setError('')
-        createProject(name.trim(), description.trim(), sourceRepo.trim(), token)
+        createProject(name.trim(), description.trim(), '', token)
           .then((project) => onSelect(project.id)).catch((err) => setError(errorMessage(err))).finally(() => setBusy(false))
       }}>
         <fieldset disabled={busy} style={{ border: 0, padding: 0 }}>
           <legend>New app workspace</legend>
           <label>App name<input style={fieldStyle} required value={name} onChange={(e) => setName(e.target.value)} /></label>
           <label>Description<textarea style={fieldStyle} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
-          <label>Source repository (optional)<input style={fieldStyle} placeholder="owner/repository" value={sourceRepo} onChange={(e) => setSourceRepo(e.target.value)} /></label>
+          <p style={{ color: 'var(--text-secondary)' }}>After creating the app, connect one or more repositories from its workspace. Repository ownership is stored in FuzeX, not inferred from an imported manifest.</p>
           <div style={actionsStyle}><Button type="submit">{busy ? 'Creating…' : 'Create app'}</Button></div>
         </fieldset>
       </form>}

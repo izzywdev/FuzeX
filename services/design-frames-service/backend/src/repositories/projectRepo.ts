@@ -1,8 +1,8 @@
 // projectRepo.ts — design_frames.project (fxdf_prj_*).
 
-import { query, withTransaction } from '../lib/db';
+import { query } from '../lib/db';
 import { mintId, toUuid, fromUuid, type EntityId } from '../lib/identity';
-import { NotFoundError } from '../lib/errors';
+import { ConflictError, NotFoundError } from '../lib/errors';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
 import type { ReqLogger } from '../lib/logger';
 
@@ -63,36 +63,67 @@ export async function createProject(input: ProjectCreateInput, log: ReqLogger): 
   return toProjectDTO(rows[0]);
 }
 
-/**
- * Resolve an imported frame set's owning repository to one hosted app workspace.
- *
- * Imports are intentionally independent (a product can publish each feature from
- * its own repository workflow), so asking every publisher to persist a FuzeX
- * project id would make the app catalogue fragile. `sourceRepo` is already the
- * durable provenance field on every manifest; use it as the stable grouping key.
- * The advisory lock makes first import deterministic without making source_repo a
- * globally unique user-facing field for manually-created workspaces.
- */
-export async function getOrCreateImportedProject(sourceRepo: string, log: ReqLogger): Promise<ProjectDTO> {
-  const normalized = sourceRepo.trim();
-  if (!normalized) throw new Error('sourceRepo is required for imported project resolution');
-  return withTransaction(async (client) => {
-    await client.query('select pg_advisory_xact_lock(hashtext($1))', [normalized]);
-    const existing = await client.query<ProjectRow>(
-      `select * from design_frames.project where source_repo = $1 order by created_at asc, id asc limit 1`,
-      [normalized]
-    );
-    if (existing.rows[0]) return toProjectDTO(existing.rows[0]);
+export interface ProjectRepositoryDTO {
+  repository: string;
+  framesPath: string;
+  createdAt: string;
+}
 
-    const name = normalized.split('/').filter(Boolean).at(-1) || normalized;
-    const id = mintId('project');
-    const created = await client.query<ProjectRow>(
-      `insert into design_frames.project (id, name, description, source_repo)
+interface ProjectRepositoryRow {
+  id: string;
+  project_id: string;
+  repository: string;
+  frames_path: string;
+  created_at: Date;
+}
+
+function toProjectRepositoryDTO(row: ProjectRepositoryRow): ProjectRepositoryDTO {
+  return { repository: row.repository, framesPath: row.frames_path, createdAt: row.created_at.toISOString() };
+}
+
+export async function listProjectRepositories(id: EntityId<'project'>, log: ReqLogger): Promise<ProjectRepositoryDTO[]> {
+  const { rows } = await query<ProjectRepositoryRow>(
+    `select * from design_frames.project_repository where project_id = $1 order by repository asc`, [toUuid(id)], log
+  );
+  return rows.map(toProjectRepositoryDTO);
+}
+
+export async function connectRepository(
+  projectId: EntityId<'project'>, repository: string, framesPath: string, log: ReqLogger
+): Promise<ProjectRepositoryDTO> {
+  const id = mintId('project');
+  try {
+    const { rows } = await query<ProjectRepositoryRow>(
+      `insert into design_frames.project_repository (id, project_id, repository, frames_path)
        values ($1, $2, $3, $4) returning *`,
-      [toUuid(id), name, `Imported design workspace for ${normalized}.`, normalized]
+      [toUuid(id), toUuid(projectId), repository, framesPath], log
     );
-    return toProjectDTO(created.rows[0]);
-  }, log);
+    return toProjectRepositoryDTO(rows[0]);
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      throw new ConflictError(`repository '${repository}' is already connected to an App`);
+    }
+    throw err;
+  }
+}
+
+export async function findProjectByRepository(repository: string, log: ReqLogger): Promise<EntityId<'project'> | null> {
+  const { rows } = await query<{ project_id: string }>(
+    `select project_id from design_frames.project_repository where repository = $1`, [repository], log
+  );
+  return rows[0] ? fromUuid('project', rows[0].project_id) : null;
+}
+
+export async function assignImportedFeaturesForRepository(projectId: EntityId<'project'>, repository: string, log: ReqLogger): Promise<number> {
+  const { rows } = await query<{ count: string }>(
+    `with updated as (
+       update design_frames.feature set project_id = $1
+       where source_repo = $2 and project_id is null
+       returning id
+     ) select count(*)::text as count from updated`,
+    [toUuid(projectId), repository], log
+  );
+  return Number(rows[0]?.count ?? 0);
 }
 
 export async function getProjectRowByUuid(uuid: string, log: ReqLogger): Promise<ProjectRow | null> {

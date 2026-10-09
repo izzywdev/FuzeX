@@ -165,7 +165,9 @@ export async function syncFeature(slug, localDir, { sourceRepo } = {}) {
   if (!sourceFiles.has('manifest.json')) throw new Error('source directory is missing manifest.json');
   const manifest = JSON.parse(sourceFiles.get('manifest.json').toString('utf8'));
   const sourceStamp = await stampSourceFiles(sourceFiles, manifest);
-  const resolvedSourceRepo = sourceRepo || manifest.sourceRepo || null;
+  // A connected repository is addressed canonically as owner/repository. CI
+  // supplies it automatically, while local users can pass it explicitly.
+  const resolvedSourceRepo = sourceRepo || manifest.sourceRepo || process.env.GITHUB_REPOSITORY || null;
   let expectedStamp = null;
   try { expectedStamp = (await getStamp(slug)).stamp; } catch (err) {
     if (err.status !== 404) throw err;

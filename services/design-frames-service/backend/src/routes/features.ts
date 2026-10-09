@@ -49,13 +49,15 @@ async function indexRevision(revision: fileStore.StoreRevision, req: Request) {
     build?: { flows?: Array<{ id: string }> };
     sourceRepo?: unknown;
   };
-  // A repository import becomes visible in the portal catalogue without a
-  // second, mutable project-id setting in every consuming repo. Existing
-  // manually-created features remain unassigned unless their manifest carries
-  // provenance, preserving backward compatibility.
-  if (typeof manifest.sourceRepo === 'string' && manifest.sourceRepo.trim()) {
-    const project = await projectRepo.getOrCreateImportedProject(manifest.sourceRepo, log(req));
-    await featureRepo.assignFeatureToProject(featureRow.id, project.id, log(req));
+  // Manifests carry provenance only. Apps and repository connections are
+  // database-managed, so an import joins a workspace only after that repository
+  // has been explicitly connected through the App API/UI.
+  const sourceRepo = typeof manifest.sourceRepo === 'string' && manifest.sourceRepo.trim()
+    ? manifest.sourceRepo.trim() : null;
+  await featureRepo.setFeatureSourceRepo(featureRow.id, sourceRepo, log(req));
+  if (sourceRepo) {
+    const projectId = await projectRepo.findProjectByRepository(sourceRepo, log(req));
+    if (projectId) await featureRepo.assignFeatureToProject(featureRow.id, projectId, log(req));
   }
   const flowIdByKey = new Map<string, string>();
   for (const flowDecl of manifest.build?.flows ?? []) {
@@ -122,7 +124,7 @@ featuresRouter.post('/', async (req, res) => {
   }
 
   const feature = await fileStore.createFeature(slug, manifest);
-  await featureRepo.createFeatureRow(slug, projectRefId, log(req));
+  await featureRepo.createFeatureRow(slug, projectRefId, (sourceRepo as string | null) || null, log(req));
   res.status(201).json({ slug: feature.slug, manifest: feature.manifest });
 });
 

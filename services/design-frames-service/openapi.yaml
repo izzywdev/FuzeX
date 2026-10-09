@@ -540,6 +540,40 @@ paths:
                   page: { $ref: '#/components/schemas/PageInfo' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/projects/{id}/repositories:
+    parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+    get:
+      summary: List database-managed repository connections for an App workspace
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProjectRepository' }
+    post:
+      summary: Connect a repository to an App and adopt matching imported frames
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectRepositoryCreate' }
+      responses:
+        '201':
+          description: Connected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectRepository' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/projects/{id}/workspace:
     get:
       summary: Get an app workspace with manifest-backed counts and its latest design system
@@ -1020,7 +1054,8 @@ components:
         sourceRepo:
           type: string
           nullable: true
-          description: "Which consuming product this project's features are for, e.g. 'FuzeFront'."
+          deprecated: true
+          description: "Legacy display metadata. App-to-repository ownership is managed by ProjectRepository."
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     ProjectCreate:
@@ -1033,7 +1068,7 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         description: { type: string, nullable: true }
-        sourceRepo: { type: string, nullable: true }
+        sourceRepo: { type: string, nullable: true, deprecated: true }
     ProjectPatch:
       type: object
       additionalProperties: false
@@ -1042,13 +1077,38 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         description: { type: string, nullable: true }
-        sourceRepo: { type: string, nullable: true }
+        sourceRepo: { type: string, nullable: true, deprecated: true }
+
+    ProjectRepository:
+      type: object
+      required: [repository, framesPath, createdAt]
+      properties:
+        repository: { type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' }
+        framesPath: { type: string, description: 'Repository-relative root containing static UX frames.' }
+        createdAt: { type: string, format: date-time }
+        adoptedFeatures: { type: integer, minimum: 0, description: 'Previously imported provenance-matched UX areas adopted by this connection.' }
+    ProjectRepositoryCreate:
+      type: object
+      additionalProperties: false
+      required: [repository]
+      properties:
+        repository: { type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' }
+        framesPath: { type: string, default: 'design/frames' }
+    DetectedService:
+      type: object
+      required: [name, openapi, featureCount]
+      properties:
+        name: { type: string }
+        openapi: { type: string }
+        featureCount: { type: integer, minimum: 1 }
 
     ProjectWorkspace:
       type: object
-      required: [project, featureCount, flowCount, frameCount, designSystem]
+      required: [project, repositories, detectedServices, featureCount, flowCount, frameCount, designSystem]
       properties:
         project: { $ref: '#/components/schemas/Project' }
+        repositories: { type: array, items: { $ref: '#/components/schemas/ProjectRepository' } }
+        detectedServices: { type: array, items: { $ref: '#/components/schemas/DetectedService' } }
         featureCount: { type: integer, minimum: 0 }
         flowCount: { type: integer, minimum: 0 }
         frameCount: { type: integer, minimum: 0 }
