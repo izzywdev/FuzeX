@@ -14,6 +14,7 @@ import { projectsRouter } from './routes/projects';
 import { featuresRouter } from './routes/features';
 import { discussionsRouter, featureDiscussionsRouter } from './routes/discussions';
 import { generationsRouter } from './routes/generations';
+import { artifactBundlesRouter, artifactBundlePreviewRouter } from './routes/artifactBundles';
 
 export function createApp() {
   const app = express();
@@ -97,6 +98,8 @@ export function createApp() {
   app.use('/api/v1/features', generationsRouter);
   app.use('/api/v1/features', featuresRouter);
   app.use('/api/v1/projects', projectsRouter);
+  app.use('/api/v1/projects/:id/artifact-bundles', artifactBundlesRouter);
+  app.use('/api/v1/artifact-bundles', artifactBundlePreviewRouter);
   app.use('/api/v1/discussions', discussionsRouter);
 
   app.use((_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));
