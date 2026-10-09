@@ -194,7 +194,7 @@ export interface DetectedService {
   featureCount: number
 }
 
-export type TraceTargetType = 'project' | 'flow' | 'frame' | 'element' | 'designSystemComponent'
+export type TraceTargetType = 'project' | 'flow' | 'flowStep' | 'frame' | 'element' | 'designSystemComponent'
 export interface TraceLink {
   id: string
   projectId: string

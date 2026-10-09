@@ -58,7 +58,7 @@ export function listFeatures(): Promise<{ features: FeatureSummary[] }> {
 
 export function getFeature(
   slug: string
-): Promise<{ slug: string; manifest: Manifest; frames: Record<string, string> }> {
+): Promise<{ slug: string; projectId: string | null; manifest: Manifest; frames: Record<string, string> }> {
   return api(`/api/v1/features/${encodeURIComponent(slug)}`)
 }
 
@@ -202,11 +202,12 @@ export function createDesignSystemRevision(projectId: string, input: DesignSyste
   })
 }
 
-export function listTraceLinks(projectId: string): Promise<{ items: TraceLink[] }> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/trace-links`) }
-export function createTraceLink(projectId: string, input: { targetType: TraceTargetType; targetRef: string; selector?: string | null; sourceSystem: 'fuzeplan' | 'fuzequality'; sourceKind: 'requirement' | 'llm_quote' | 'test_case'; externalRef: string; externalUrl?: string | null; quoteText?: string | null }, token: string): Promise<TraceLink> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/trace-links`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(input) }) }
+export function listTraceLinks(projectId: string, target?: { targetType: string; targetRef: string }): Promise<{ items: TraceLink[] }> { const query = target ? `?${new URLSearchParams(target).toString()}` : ''; return api(`/api/v1/projects/${encodeURIComponent(projectId)}/trace-links${query}`) }
+export function createTraceLink(projectId: string, input: { targetType: TraceTargetType; targetRef: string; selector?: string | null; contentStamp?: string | null; sourceSystem: 'fuzeplan' | 'fuzequality'; sourceKind: 'requirement' | 'llm_quote' | 'test_case'; externalRef: string; externalUrl?: string | null; quoteText?: string | null }, token: string): Promise<TraceLink> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/trace-links`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(input) }) }
 export function listDesignPolicies(projectId: string): Promise<{ items: DesignPolicy[] }> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/design-policies`) }
 export function createDesignPolicy(projectId: string, input: { targetType: TraceTargetType; targetRef: string; selector?: string | null; title: string; instruction: string; traceLinkIds: string[] }, token: string): Promise<DesignPolicy> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/design-policies`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(input) }) }
 export function approveDesignPolicy(projectId: string, policyId: string, token: string): Promise<DesignPolicy> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/design-policies/${encodeURIComponent(policyId)}/approve`, { method: 'POST', headers: authHeaders(token) }) }
+export function supersedeDesignPolicy(projectId: string, policyId: string, input: { targetType: TraceTargetType; targetRef: string; selector?: string | null; title: string; instruction: string; traceLinkIds: string[] }, token: string): Promise<DesignPolicy> { return api(`/api/v1/projects/${encodeURIComponent(projectId)}/design-policies/${encodeURIComponent(policyId)}/supersede`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(input) }) }
 
 export function listGenerations(slug: string): Promise<{ generations: GenerationSummary[] }> {
   return api(`/api/v1/features/${encodeURIComponent(slug)}/generations`)

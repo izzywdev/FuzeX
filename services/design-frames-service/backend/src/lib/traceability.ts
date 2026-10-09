@@ -1,10 +1,10 @@
 import { assertRef, type EntityId } from './identity';
 import { ValidationError } from './errors';
 
-export type TraceTargetType = 'project' | 'flow' | 'frame' | 'element' | 'designSystemComponent';
+export type TraceTargetType = 'project' | 'flow' | 'flowStep' | 'frame' | 'element' | 'designSystemComponent';
 export type TraceSourceSystem = 'fuzeplan' | 'fuzequality' | 'fuzex';
 export type TraceSourceKind = 'requirement' | 'llm_quote' | 'test_case' | 'design_decision';
-const TARGET_TYPES = new Set<TraceTargetType>(['project', 'flow', 'frame', 'element', 'designSystemComponent']);
+const TARGET_TYPES = new Set<TraceTargetType>(['project', 'flow', 'flowStep', 'frame', 'element', 'designSystemComponent']);
 const SYSTEMS = new Set<TraceSourceSystem>(['fuzeplan', 'fuzequality', 'fuzex']);
 const KINDS = new Set<TraceSourceKind>(['requirement', 'llm_quote', 'test_case', 'design_decision']);
 
@@ -19,8 +19,9 @@ export function parseTraceLink(body: unknown): TraceLinkInput {
   const sourceKind = enumValue(value.sourceKind, KINDS, 'sourceKind');
   if (sourceSystem === 'fuzeplan' && !['requirement', 'llm_quote'].includes(sourceKind)) throw new ValidationError('invalid FuzePlan evidence kind');
   if (sourceSystem === 'fuzequality' && sourceKind !== 'test_case') throw new ValidationError('invalid FuzeQuality evidence kind');
+  if (sourceSystem === 'fuzex' && sourceKind !== 'design_decision') throw new ValidationError('invalid FuzeX evidence kind');
   const quoteText = nullableText(value.quoteText, 'quoteText');
-  if ((sourceKind === 'llm_quote') !== (quoteText !== null)) throw new ValidationError('quoteText is required only for llm_quote evidence');
+  if ((sourceKind === 'llm_quote') !== (quoteText !== null) || (sourceKind === 'llm_quote' && !quoteText?.trim())) throw new ValidationError('quoteText is required only for llm_quote evidence');
   return { ...target, sourceSystem, sourceKind, externalRef: requiredText(value.externalRef, 'externalRef'), externalUrl: safeExternalUrl(value.externalUrl), quoteText, metadata: optionalObject(value.metadata, 'metadata') };
 }
 
@@ -28,11 +29,11 @@ export function parseTarget(value: Record<string, unknown>): TraceTarget {
   const targetType = enumValue(value.targetType, TARGET_TYPES, 'targetType');
   const targetRef = requiredText(value.targetRef, 'targetRef');
   if (targetType === 'project') assertRef('project', targetRef);
-  if (targetType === 'flow') assertRef('flow', targetRef);
+  if (targetType === 'flow' || targetType === 'flowStep') assertRef('flow', targetRef);
   if (targetType === 'frame' || targetType === 'element') assertRef('frameRef', targetRef);
   if (targetType === 'designSystemComponent' && !/^[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(targetRef)) throw new ValidationError('targetRef must be a design-system component key');
   const selector = nullableText(value.selector, 'selector');
-  if (targetType === 'element' && !selector) throw new ValidationError('selector is required for an element target');
+  if ((targetType === 'element' || targetType === 'flowStep') && !selector) throw new ValidationError(`selector is required for a ${targetType} target`);
   const contentStamp = nullableText(value.contentStamp, 'contentStamp');
   if (contentStamp && !/^[0-9a-f]{64}$/.test(contentStamp)) throw new ValidationError('contentStamp must be a sha256 hex value');
   return { targetType, targetRef, selector, contentStamp };

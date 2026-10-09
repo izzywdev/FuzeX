@@ -225,6 +225,13 @@ projectsRouter.post('/:id/design-policies/:policyId/approve', async (req: Authen
   res.status(200).json(await traceabilityRepo.approvePolicy(id, policyId, actor, log(req)));
 });
 
+projectsRouter.post('/:id/design-policies/:policyId/supersede', async (req: AuthenticatedRequest, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const policyId = assertRef('designPolicy', req.params.policyId) as EntityId<'designPolicy'>;
+  const actor = authenticatedActor(req).actorRef;
+  res.status(201).json(await traceabilityRepo.supersedePolicy(id, policyId, parsePolicy(req.body), actor, log(req)));
+});
+
 // Projects are the hosted application workspaces. Counts use the authoritative
 // manifests so untouched flows do not disappear from the workspace summary.
 projectsRouter.get('/:id/workspace', async (req, res) => {

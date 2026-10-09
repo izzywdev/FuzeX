@@ -909,6 +909,25 @@ paths:
         '200': { description: Approved }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/projects/{id}/design-policies/{policyId}/supersede:
+    post:
+      summary: Supersede an approved or draft policy with a new immutable draft
+      description: The replacement is a new draft linked to the prior policy; the prior instruction is retained as historical evidence and removed from agent consumption.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - name: policyId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/DesignPolicyId' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DesignPolicyCreate' } } }
+      responses:
+        '201': { description: Replacement draft created }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/discussions:
     get:
       summary: List discussions for one polymorphic target (paginated)
@@ -1294,7 +1313,7 @@ components:
       pattern: '^fxdf_dpl_[0-9a-hjkmnp-tv-z]+$'
     TraceTargetType:
       type: string
-      enum: [project, flow, frame, element, designSystemComponent]
+      enum: [project, flow, flowStep, frame, element, designSystemComponent]
     TraceLinkCreate:
       type: object
       additionalProperties: false

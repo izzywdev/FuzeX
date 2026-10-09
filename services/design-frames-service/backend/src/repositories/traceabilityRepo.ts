@@ -17,7 +17,7 @@ async function requireProject(projectId: EntityId<'project'>, log: ReqLogger): P
 async function requireTargetInProject(projectId: EntityId<'project'>, target: TraceTarget, log: ReqLogger): Promise<void> {
   if (target.targetType === 'project') { if (target.targetRef !== projectId) throw new NotFoundError('trace target project does not match the route project'); return; }
   if (target.targetType === 'designSystemComponent') return; // Component keys are namespaced by this project in the stored row.
-  const text = target.targetType === 'flow'
+  const text = target.targetType === 'flow' || target.targetType === 'flowStep'
     ? 'select 1 from design_frames.flow where id = $1 and project_id = $2'
     : `select 1 from design_frames.frame_ref r join design_frames.flow f on f.id = r.flow_id left join design_frames.feature ft on ft.id = f.feature_id where r.id = $1 and (f.project_id = $2 or ft.project_id = $2)`;
   const result = await query(text, [toUuid(target.targetRef as EntityId<'flow' | 'frameRef'>), toUuid(projectId)], log);
@@ -61,4 +61,30 @@ export async function approvePolicy(projectId: EntityId<'project'>, policyId: En
   await query(`update design_frames.design_agent_policy set status = 'approved', approved_by = $3, approved_at = now() where project_id = $1 and id = $2`, [toUuid(projectId),toUuid(policyId),actor], log);
   const result = await query<PolicyRow>(`${POLICY_SELECT} where p.project_id = $1 and p.id = $2 group by p.id`, [toUuid(projectId),toUuid(policyId)], log);
   return policyDTO(result.rows[0]);
+}
+
+/**
+ * Policy instructions are evidence records, not mutable prompts.  Replacing a
+ * decision creates a new draft and marks the previous policy superseded in the
+ * same transaction; no consumer can mistake a changed instruction for the
+ * one that was originally approved.
+ */
+export async function supersedePolicy(projectId: EntityId<'project'>, policyId: EntityId<'designPolicy'>, input: TraceTarget & { title: string; instruction: string; traceLinkIds: EntityId<'traceLink'>[] }, actor: string, log: ReqLogger): Promise<DesignPolicyDTO> {
+  await requireTargetInProject(projectId, input, log);
+  return withTransaction(async (client) => {
+    const previous = await client.query<PolicyRow>('select * from design_frames.design_agent_policy where project_id = $1 and id = $2 for update', [toUuid(projectId), toUuid(policyId)]);
+    const current = previous.rows[0];
+    if (!current) throw new NotFoundError(`design policy '${policyId}' not found in project '${projectId}'`);
+    if (current.status === 'superseded') throw new ConflictError('a superseded design policy cannot be superseded again');
+    if (input.traceLinkIds.length) {
+      const refs = input.traceLinkIds.map(toUuid);
+      const links = await client.query<{ id: string }>('select id from design_frames.design_trace_link where project_id = $1 and id = any($2::uuid[])', [toUuid(projectId), refs]);
+      if (links.rows.length !== refs.length) throw new NotFoundError('one or more trace links do not belong to this project');
+    }
+    const id = mintId('designPolicy');
+    const inserted = await client.query<PolicyRow>(`insert into design_frames.design_agent_policy (id,project_id,target_type,target_ref,selector,title,instruction,created_by,supersedes_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *, '{}'::uuid[] as trace_link_ids`, [toUuid(id),toUuid(projectId),input.targetType,input.targetRef,input.selector,input.title,input.instruction,actor,toUuid(policyId)]);
+    for (const traceId of input.traceLinkIds) await client.query('insert into design_frames.design_agent_policy_trace_link (policy_id, trace_link_id) values ($1,$2)', [toUuid(id), toUuid(traceId)]);
+    await client.query("update design_frames.design_agent_policy set status = 'superseded' where project_id = $1 and id = $2", [toUuid(projectId), toUuid(policyId)]);
+    return policyDTO({ ...inserted.rows[0], trace_link_ids: input.traceLinkIds.map(toUuid) });
+  }, log);
 }

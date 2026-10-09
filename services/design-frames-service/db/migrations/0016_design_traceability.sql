@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS design_frames.design_trace_link (
   id uuid PRIMARY KEY,
   project_id uuid NOT NULL REFERENCES design_frames.project(id),
-  target_type text NOT NULL CHECK (target_type IN ('project','flow','frame','element','designSystemComponent')),
+  target_type text NOT NULL CHECK (target_type IN ('project','flow','flowStep','frame','element','designSystemComponent')),
   target_ref text NOT NULL CHECK (length(trim(target_ref)) > 0),
   selector text,
   content_stamp text CHECK (content_stamp IS NULL OR content_stamp ~ '^[0-9a-f]{64}$'),
@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS ix_design_trace_link_target
 CREATE TABLE IF NOT EXISTS design_frames.design_agent_policy (
   id uuid PRIMARY KEY,
   project_id uuid NOT NULL REFERENCES design_frames.project(id),
-  target_type text NOT NULL CHECK (target_type IN ('project','flow','frame','element','designSystemComponent')),
+  target_type text NOT NULL CHECK (target_type IN ('project','flow','flowStep','frame','element','designSystemComponent')),
   target_ref text NOT NULL CHECK (length(trim(target_ref)) > 0),
   selector text,
   title text NOT NULL CHECK (length(trim(title)) > 0),
