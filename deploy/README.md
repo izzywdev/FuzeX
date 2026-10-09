@@ -116,3 +116,29 @@ backups into an isolated workspace first, compare immutable revision hashes and
 approval/discussion counts, and delegate a production restore/cutover to FuzeInfra.
 Keep source GitHub Pages and Issues available until every app passes import and
 restore validation.
+
+### Staging smoke and rollback evidence
+
+Run the manual **FuzeX staging smoke** workflow after a staging GitOps sync. It
+uses staging-only environment secrets and first checks `/health` and `/ready`
+through the portal's actual same-origin API mount; it rejects a `200` HTML SPA
+fallback. Its default mode is read-only.
+
+For a controlled end-to-end test, select `mutation=true`. The workflow can only
+publish the checked-in fixture to the dedicated `fuzex-staging-smoke` feature,
+then proves that replaying the import retains the same immutable stamp, the
+exact revision bytes can be retrieved, and an approval is appended and bound to
+that stamp. It never targets a product feature, deletes data, or dispatches
+Argo/FuzeInfra operations.
+
+Before a rollback or writer restart, record a historical stamp and the SHA-256
+of one frame as non-secret change evidence. Supply them as `rollback_stamp` and
+`rollback_frame_sha256` to the same workflow after reconciliation. It reads the
+exact historical revision and compares the frame hash, proving retained review
+content survived. This is evidence for rollback safety, not a substitute for a
+paired database/PVC restore rehearsal; that operation remains FuzeInfra-owned.
+
+Required staging environment secrets are `FUZE_X_STAGING_API_BASE_URL`,
+`FUZE_X_STAGING_SMOKE_TOKEN`, and (when the workload uses delegated auth)
+`FUZE_X_STAGING_DELEGATION_TOKEN`. The tokens must be issued by FuzeFront and
+granted only the FuzeX staging workspace permissions needed by this fixture.

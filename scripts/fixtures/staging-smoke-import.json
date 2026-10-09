@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "name": "FuzeX staging smoke workspace",
+    "description": "Dedicated immutable import/revision/approval verification fixture. Do not use this feature for product UX work.",
+    "designSystem": "fuse-seam (@fuzefront/design-system)",
+    "entry": "index.html",
+    "sourceRepo": "izzywdev/FuzeX",
+    "frames": [
+      {
+        "id": "staging-smoke-frame",
+        "file": "index.html",
+        "label": "Staging smoke frame",
+        "summary": "A non-production frame used only to prove immutable review storage.",
+        "flow": "staging-smoke-flow",
+        "testHooks": ["data-testid=staging-smoke-frame"]
+      }
+    ],
+    "build": {
+      "flows": [
+        {
+          "id": "staging-smoke-flow",
+          "title": "Staging smoke flow",
+          "orchestrator": "test-engineer",
+          "route": "/staging-smoke",
+          "approved": false
+        }
+      ]
+    }
+  },
+  "frames": {
+    "index.html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>FuzeX staging smoke</title></head><body><main data-testid=\"staging-smoke-frame\">FuzeX staging smoke fixture</main></body></html>"
+  }
+}
