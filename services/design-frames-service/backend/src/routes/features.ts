@@ -18,6 +18,7 @@ import { ConflictError, UnauthorizedError, ValidationError } from '../lib/errors
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
 import { authenticatedActor, authenticatedEventContext, type AuthenticatedRequest } from '../middleware/auth';
+import { canonicalRepositoryRef } from '../lib/repositoryRef';
 
 export const featuresRouter = Router();
 
@@ -59,8 +60,7 @@ async function indexRevision(revision: fileStore.StoreRevision, req: Request) {
   // Manifests carry provenance only. Apps and repository connections are
   // database-managed, so an import joins a workspace only after that repository
   // has been explicitly connected through the App API/UI.
-  const sourceRepo = typeof manifest.sourceRepo === 'string' && manifest.sourceRepo.trim()
-    ? manifest.sourceRepo.trim() : null;
+  const sourceRepo = canonicalRepositoryRef(manifest.sourceRepo);
   await featureRepo.setFeatureSourceRepo(featureRow.id, sourceRepo, log(req));
   if (sourceRepo) {
     const projectId = await projectRepo.findProjectByRepository(sourceRepo, log(req));
@@ -120,7 +120,7 @@ featuresRouter.post('/', async (req, res) => {
     description: (description as string) || resolvedName,
     designSystem: (designSystem as string) || 'fuse-seam (@fuzefront/design-system)',
     entry: (entry as string) || 'index.html',
-    sourceRepo: (sourceRepo as string | null) || null,
+    sourceRepo: canonicalRepositoryRef(sourceRepo),
     frames: [],
     build: { flows: [] },
   };
@@ -132,7 +132,7 @@ featuresRouter.post('/', async (req, res) => {
   }
 
   const feature = await fileStore.createFeature(slug, manifest);
-  await featureRepo.createFeatureRow(slug, projectRefId, (sourceRepo as string | null) || null, log(req));
+  await featureRepo.createFeatureRow(slug, projectRefId, canonicalRepositoryRef(sourceRepo), log(req));
   res.status(201).json({ slug: feature.slug, manifest: feature.manifest });
 });
 
