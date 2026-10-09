@@ -25,6 +25,10 @@ info:
         - 'ADD GET /api/v1/features/{slug}/flows/{flowId}/approvals — append-only decision history (paginated).'
         - 'EXTEND approve/reject bodies: both accept optional contentStamp; reject now requires reason; responses echo the created approval id (fxdf_apr_*) + stamp. Old {approvedBy}-only approve callers still work.'
         - 'ADD discussions: POST/GET/GET{id}/PATCH{id} + POST {id}/comments, and convenience GET /api/v1/features/{slug}/discussions. Polymorphic target carries its type (targetType + targetRef).'
+    - version: 0.3.0
+      date: '2026-10-09'
+      changes:
+        - 'ADD project-owned native UX flow documents and append-only immutable revisions. New flows do not require Git or a feature manifest.'
     - version: 0.1.0
       date: '2026-08-11'
       changes:
@@ -538,6 +542,112 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/FeatureSummary' }
                   page: { $ref: '#/components/schemas/PageInfo' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/flows:
+    parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+    get:
+      summary: List project-owned native UX flows
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/NativeFlow' } }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+    post:
+      summary: Create a native UX flow and its first immutable document revision
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NativeFlowCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow, revision]
+                properties:
+                  flow: { $ref: '#/components/schemas/NativeFlow' }
+                  revision: { $ref: '#/components/schemas/FlowDocumentRevision' }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/projects/{id}/flows/{flowId}:
+    get:
+      summary: Get one project-owned native UX flow
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - { $ref: '#/components/parameters/FlowIdPath' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/NativeFlow' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/flows/{flowId}/revisions:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectIdPath' }
+      - { $ref: '#/components/parameters/FlowIdPath' }
+    get:
+      summary: List immutable native flow document revisions
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/FlowDocumentRevision' } }
+                  page: { $ref: '#/components/schemas/PageInfo' }
+    post:
+      summary: Append a native flow document revision with optimistic concurrency
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FlowDocumentRevisionCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/FlowDocumentRevision' } } } }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: expectedRevision differs from current latest revision }
+
+  /api/v1/projects/{id}/flows/{flowId}/revisions/{revision}:
+    get:
+      summary: Read one immutable native flow document revision
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - { $ref: '#/components/parameters/FlowIdPath' }
+        - name: revision
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 2147483647 }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FlowDocumentRevision' } } } }
+        '400': { $ref: '#/components/responses/Validation' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/projects/{id}/repositories:
@@ -1236,6 +1346,47 @@ components:
         name: { type: string }
         openapi: { type: string }
         featureCount: { type: integer, minimum: 1 }
+
+    NativeFlow:
+      type: object
+      required: [id, projectId, key, name, description, currentRevision, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/FlowId' }
+        projectId: { $ref: '#/components/schemas/ProjectId' }
+        key: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        currentRevision: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    NativeFlowCreate:
+      type: object
+      additionalProperties: false
+      required: [key, name, document]
+      properties:
+        key: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        document: { type: object, additionalProperties: true, description: 'Portable UX flow document, e.g. React Flow nodes/edges.' }
+        message: { type: string, nullable: true }
+    FlowDocumentRevisionCreate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, document]
+      properties:
+        expectedRevision: { type: integer, minimum: 1, maximum: 2147483646 }
+        document: { type: object, additionalProperties: true }
+        message: { type: string, nullable: true }
+    FlowDocumentRevision:
+      type: object
+      required: [flowId, revision, document, message, createdBy, createdAt]
+      properties:
+        flowId: { $ref: '#/components/schemas/FlowId' }
+        revision: { type: integer, minimum: 1 }
+        document: { type: object, additionalProperties: true }
+        message: { type: string, nullable: true }
+        createdBy: { type: string, description: Verified caller subject }
+        createdAt: { type: string, format: date-time }
 
     ProjectWorkspace:
       type: object

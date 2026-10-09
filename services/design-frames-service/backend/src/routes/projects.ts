@@ -12,6 +12,8 @@ import * as designSystemRepo from '../repositories/designSystemRepo';
 import * as fileStore from '../lib/fileStore';
 import { parseDesignSystemRevision, parseRevisionNumber } from '../lib/designSystem';
 import { NotFoundError, UnauthorizedError } from '../lib/errors';
+import * as nativeFlowRepo from '../repositories/nativeFlowRepo';
+import { parseNativeFlowCreate, parseNativeFlowRevision, parseRevisionNumber as parseNativeFlowRevisionNumber } from '../lib/nativeFlow';
 
 export const projectsRouter = Router();
 
@@ -124,13 +126,56 @@ projectsRouter.get('/:id/features', async (req, res) => {
   res.status(200).json(result);
 });
 
+// Native UX flows are project-owned documents. Unlike /features, they are not
+// derived from a repository manifest and therefore remain available after a
+// team retires Git as its design-authoring system.
+projectsRouter.get('/:id/flows', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  await projectRepo.getProject(id, log(req));
+  res.status(200).json(await nativeFlowRepo.listNativeFlows(id, parsePageParams(req.query as Record<string, unknown>), log(req)));
+});
+
+projectsRouter.post('/:id/flows', async (req: AuthenticatedRequest, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const actor = authenticatedActor(req).actorRef;
+  if (!actor) throw new UnauthorizedError('a verified caller is required');
+  const created = await nativeFlowRepo.createNativeFlow(id, parseNativeFlowCreate(req.body), actor, log(req));
+  res.status(201).json(created);
+});
+
+projectsRouter.get('/:id/flows/:flowId', async (req, res) => {
+  const projectId = assertRef('project', req.params.id) as EntityId<'project'>;
+  const flowId = assertRef('flow', req.params.flowId) as EntityId<'flow'>;
+  res.status(200).json(await nativeFlowRepo.getNativeFlow(projectId, flowId, log(req)));
+});
+
+projectsRouter.get('/:id/flows/:flowId/revisions', async (req, res) => {
+  const projectId = assertRef('project', req.params.id) as EntityId<'project'>;
+  const flowId = assertRef('flow', req.params.flowId) as EntityId<'flow'>;
+  res.status(200).json(await nativeFlowRepo.listNativeFlowRevisions(projectId, flowId, parsePageParams(req.query as Record<string, unknown>), log(req)));
+});
+
+projectsRouter.get('/:id/flows/:flowId/revisions/:revision', async (req, res) => {
+  const projectId = assertRef('project', req.params.id) as EntityId<'project'>;
+  const flowId = assertRef('flow', req.params.flowId) as EntityId<'flow'>;
+  res.status(200).json(await nativeFlowRepo.getNativeFlowRevision(projectId, flowId, parseNativeFlowRevisionNumber(req.params.revision), log(req)));
+});
+
+projectsRouter.post('/:id/flows/:flowId/revisions', async (req: AuthenticatedRequest, res) => {
+  const projectId = assertRef('project', req.params.id) as EntityId<'project'>;
+  const flowId = assertRef('flow', req.params.flowId) as EntityId<'flow'>;
+  const actor = authenticatedActor(req).actorRef;
+  if (!actor) throw new UnauthorizedError('a verified caller is required');
+  res.status(201).json(await nativeFlowRepo.appendNativeFlowRevision(projectId, flowId, parseNativeFlowRevision(req.body), actor, log(req)));
+});
+
 // Projects are the hosted application workspaces. Counts use the authoritative
 // manifests so untouched flows do not disappear from the workspace summary.
 projectsRouter.get('/:id/workspace', async (req, res) => {
   const id = assertRef('project', req.params.id) as EntityId<'project'>;
   const project = await projectRepo.getProject(id, log(req));
   const features = await projectRepo.listFeatureIdsByProject(toUuid(id), log(req));
-  let flowCount = 0;
+  let flowCount = await nativeFlowRepo.countNativeFlows(id, log(req));
   let frameCount = 0;
   for (const feature of features) {
     const manifest = await fileStore.getManifest(feature.slug);
