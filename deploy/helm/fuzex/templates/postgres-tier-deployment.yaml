@@ -100,6 +100,14 @@ spec:
               value: {{ .Values.fuzefront.requiredScope | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.postgresTier.logLevel | quote }}
+            - name: FUZEX_LIFECYCLE_EVENTS_ENABLED
+              value: {{ ternary "true" "false" .Values.postgresTier.lifecycleEvents.enabled | quote }}
+            {{- if .Values.postgresTier.lifecycleEvents.enabled }}
+            - name: KAFKA_BROKERS
+              value: {{ required "postgresTier.lifecycleEvents.brokers is required when lifecycle events are enabled" .Values.postgresTier.lifecycleEvents.brokers | quote }}
+            - name: KAFKA_GROUP_ID
+              value: {{ .Values.postgresTier.lifecycleEvents.groupId | quote }}
+            {{- end }}
             # FuzeInfra publishes the sealed credential into this chart's files/
             # directory; templates/design-frames-db-sealed.yaml applies it.
             # NOT optional: backend/src/lib/db.ts throws on the first query if

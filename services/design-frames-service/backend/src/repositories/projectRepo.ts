@@ -12,6 +12,7 @@ export interface ProjectRow {
   name: string;
   description: string | null;
   source_repo: string | null;
+  organization_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -32,6 +33,7 @@ export interface ProjectDTO {
   name: string;
   description: string | null;
   sourceRepo: string | null;
+  organizationId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +44,7 @@ export function toProjectDTO(row: ProjectRow): ProjectDTO {
     name: row.name,
     description: row.description,
     sourceRepo: row.source_repo,
+    organizationId: row.organization_id,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -51,15 +54,17 @@ export interface ProjectCreateInput {
   name: string;
   description?: string | null;
   sourceRepo?: string | null;
+  /** Verified FuzeFront tenant; never supplied by the API body. */
+  organizationId: string;
 }
 
 export async function createProject(input: ProjectCreateInput, log: ReqLogger, eventContext?: EventContext): Promise<ProjectDTO> {
   const id = mintId('project');
   return withTransaction(async (client) => {
   const { rows } = await client.query<ProjectRow>(
-    `insert into design_frames.project (id, name, description, source_repo)
-     values ($1, $2, $3, $4) returning *`,
-    [toUuid(id), input.name, input.description ?? null, input.sourceRepo ?? null],
+    `insert into design_frames.project (id, name, description, source_repo, organization_id)
+     values ($1, $2, $3, $4, $5) returning *`,
+    [toUuid(id), input.name, input.description ?? null, input.sourceRepo ?? null, input.organizationId]
   );
   const project = toProjectDTO(rows[0]);
   if (eventContext) await enqueueEvent(client, project.id, makeEvent(FUZE_X_EVENT_TOPICS.projectCreated, eventContext, { projectId: project.id, name: project.name, sourceRepo: project.sourceRepo }));
@@ -134,13 +139,14 @@ export async function assignImportedFeaturesForRepository(projectId: EntityId<'p
   return Number(rows[0]?.count ?? 0);
 }
 
-export async function getProjectRowByUuid(uuid: string, log: ReqLogger): Promise<ProjectRow | null> {
-  const { rows } = await query<ProjectRow>(`select * from design_frames.project where id = $1`, [uuid], log);
+export async function getProjectRowByUuid(uuid: string, log: ReqLogger, organizationId?: string): Promise<ProjectRow | null> {
+  const scoped = organizationId ? ` and organization_id = $2` : '';
+  const { rows } = await query<ProjectRow>(`select * from design_frames.project where id = $1${scoped}`, organizationId ? [uuid, organizationId] : [uuid], log);
   return rows[0] ?? null;
 }
 
-export async function getProject(id: EntityId<'project'>, log: ReqLogger): Promise<ProjectDTO> {
-  const row = await getProjectRowByUuid(toUuid(id), log);
+export async function getProject(id: EntityId<'project'>, log: ReqLogger, organizationId?: string): Promise<ProjectDTO> {
+  const row = await getProjectRowByUuid(toUuid(id), log, organizationId);
   if (!row) throw new NotFoundError(`project '${id}' not found`);
   return toProjectDTO(row);
 }
@@ -187,16 +193,20 @@ export async function patchProject(
   }, log);
 }
 
-export async function listProjects(page: PageParams, log: ReqLogger): Promise<Page<ProjectDTO>> {
+export async function listProjects(page: PageParams, log: ReqLogger, organizationId?: string): Promise<Page<ProjectDTO>> {
   const params: unknown[] = [];
   let where = '';
+  if (organizationId) {
+    params.push(organizationId);
+    where = `where organization_id = $1`;
+  }
   if (page.cursor) {
     const { v, id } = decodeCursor(page.cursor);
     // Bind the full-precision cursor text back as an explicit timestamptz so
     // the row comparison compares at the same microsecond precision Postgres
     // stores, rather than relying on an implicit/ambiguous cast.
     params.push(v, toUuid(id as EntityId<'project'>));
-    where = `where (created_at, id) > ($1::timestamptz, $2)`;
+    where += `${where ? ' and' : 'where'} (created_at, id) > ($${params.length - 1}::timestamptz, $${params.length})`;
   }
   params.push(page.limit + 1);
   const { rows } = await query<ProjectCursorRow>(

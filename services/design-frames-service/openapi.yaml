@@ -1258,7 +1258,7 @@ components:
 
     Project:
       type: object
-      required: [id, name, createdAt, updatedAt]
+      required: [id, name, organizationId, createdAt, updatedAt]
       properties:
         id: { $ref: '#/components/schemas/ProjectId' }
         name: { type: string }
@@ -1268,6 +1268,10 @@ components:
           nullable: true
           deprecated: true
           description: "Legacy display metadata. App-to-repository ownership is managed by ProjectRepository."
+        organizationId:
+          type: string
+          format: uuid
+          description: Verified FuzeFront tenant binding. Server-managed; never accepted in a create or patch body.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     ProjectCreate:

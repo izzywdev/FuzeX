@@ -9,6 +9,7 @@ import { requestLogger } from './lib/logger';
 import { getPool } from './lib/db';
 import { DATA_DIR, getFrame } from './lib/fileStore';
 import { requireAuthForWrites, requireFuzeFrontAuthorization } from './middleware/auth';
+import { requireLifecycleBoundary } from './middleware/lifecycleBoundary';
 import { errorHandler } from './lib/errors';
 import { projectsRouter } from './routes/projects';
 import { featuresRouter } from './routes/features';
@@ -97,6 +98,7 @@ export function createApp() {
   // Security. Health and the separately sandboxed preview endpoint stay out of
   // this mount intentionally; previews never receive browser credentials.
   app.use('/api/v1', requireFuzeFrontAuthorization);
+  app.use('/api/v1', requireLifecycleBoundary);
 
   app.use('/api/v1/features', featureDiscussionsRouter); // GET /:slug/discussions convenience, matched first
   app.use('/api/v1/features', generationsRouter);

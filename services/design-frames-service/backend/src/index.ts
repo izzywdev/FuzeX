@@ -8,6 +8,7 @@ import { createApp } from './app';
 import { logger } from './lib/logger';
 import { closePool } from './lib/db';
 import { startOutboxRelay } from './events/outboxRelay';
+import { startLifecycleConsumer, type LifecycleConsumer } from './events/lifecycle';
 
 const PORT = parseInt(process.env.DESIGN_FRAMES_PG_PORT || '', 10) || 4410;
 const HOST = process.env.DESIGN_FRAMES_HOST || '0.0.0.0';
@@ -20,11 +21,19 @@ export function start() {
     logger.info({ port: PORT, host: HOST }, 'design-frames-service (Postgres lifecycle tier) listening');
   });
 
+  let lifecycle: LifecycleConsumer | null = null;
+  startLifecycleConsumer()
+    .then((consumer) => {
+      lifecycle = consumer;
+      logger.info({ enabled: Boolean(consumer) }, 'FuzeFront lifecycle event consumer startup complete');
+    })
+    .catch((err) => logger.error({ err }, 'failed to start FuzeFront lifecycle event consumer'));
+
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'shutting down');
     server.close(() => {
-      Promise.resolve(stopOutboxRelay?.())
-        .catch((err) => logger.error({ err }, 'error stopping FuzeX event outbox relay'))
+      Promise.all([Promise.resolve(stopOutboxRelay?.()), Promise.resolve(lifecycle?.disconnect())])
+        .catch((err) => logger.error({ err }, 'error stopping FuzeX event relays'))
         .then(() => closePool())
         .catch((err) => logger.error({ err }, 'error closing pg pool'))
         .finally(() => process.exit(0));
