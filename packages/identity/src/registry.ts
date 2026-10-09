@@ -21,6 +21,7 @@ export const ENTITY_PREFIXES = {
   discussion: 'fxdf_dsc',
   comment: 'fxdf_cmt',
   generation: 'fxdf_gen',
+  artifactBundle: 'fxdf_bnd',
 } as const;
 
 export type EntityType = keyof typeof ENTITY_PREFIXES;

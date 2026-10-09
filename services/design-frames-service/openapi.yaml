@@ -574,6 +574,95 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/projects/{id}/artifact-bundles:
+    parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+    get:
+      summary: List native immutable UX artifact bundle revisions for an App
+      security: []
+      parameters:
+        - name: flowKey
+          in: query
+          schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,99}$' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ArtifactBundle' } }
+    post:
+      summary: Declare a private immutable UX artifact bundle revision
+      description: Bytes never enter PostgreSQL and bucket/object credentials are never exposed to the browser.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArtifactBundleCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactBundle' } } } }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/projects/{id}/artifact-bundles/{bundleId}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectIdPath' }
+      - { $ref: '#/components/parameters/ArtifactBundleIdPath' }
+    get:
+      summary: Read an artifact bundle's immutable object manifest
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactBundle' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/projects/{id}/artifact-bundles/{bundleId}/objects/{path}:
+    put:
+      summary: Upload one declared object to the service-owned private store
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - { $ref: '#/components/parameters/ArtifactBundleIdPath' }
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content: { '*/*': { schema: { type: string, format: binary } } }
+      responses:
+        '204': { description: Uploaded }
+        '400': { $ref: '#/components/responses/Validation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/projects/{id}/artifact-bundles/{bundleId}/seal:
+    post:
+      summary: Verify every declared private object and seal an immutable revision
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - { $ref: '#/components/parameters/ArtifactBundleIdPath' }
+      responses:
+        '200': { description: Sealed, content: { application/json: { schema: { $ref: '#/components/schemas/ArtifactBundle' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/artifact-bundles/{bundleId}/objects/{path}:
+    get:
+      summary: Relay a declared object from a sealed private bundle for a sandboxed preview
+      description: FuzeFront's Permit.io/OPAL gateway authorizes this route; it is not a public object URL.
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/ArtifactBundleIdPath' }
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Object bytes }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/projects/{id}/workspace:
     get:
       summary: Get an app workspace with manifest-backed counts and its latest design system
@@ -866,6 +955,16 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/ProjectId' }
+    ArtifactBundleIdPath:
+      name: bundleId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ArtifactBundleId' }
+    FlowIdPath:
+      name: flowId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/FlowId' }
     DiscussionIdPath:
       name: id
       in: path
@@ -1008,6 +1107,9 @@ components:
       pattern: '^fxdf_prj_[0-9a-hjkmnp-tv-z]+$'
       description: 'Project TypeID, e.g. fxdf_prj_01h455vb4pex5vsknk084sn02q.'
       example: fxdf_prj_01h455vb4pex5vsknk084sn02q
+    ArtifactBundleId:
+      type: string
+      pattern: '^fxdf_bnd_[0-9a-hjkmnp-tv-z]+$'
     FlowId:
       type: string
       pattern: '^fxdf_flw_[0-9a-hjkmnp-tv-z]+$'
@@ -1094,6 +1196,39 @@ components:
       properties:
         repository: { type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' }
         framesPath: { type: string, default: 'design/frames' }
+
+    ArtifactObject:
+      type: object
+      required: [path, contentType, byteSize, sha256]
+      properties:
+        path: { type: string, description: 'Safe relative object path inside the immutable bundle.' }
+        contentType: { type: string }
+        byteSize: { type: integer, minimum: 0, maximum: 1073741824 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+    ArtifactBundleCreate:
+      type: object
+      additionalProperties: false
+      required: [flowKey, displayName, contentSha256, objects]
+      properties:
+        flowKey: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,99}$' }
+        displayName: { type: string, minLength: 1 }
+        contentSha256: { type: string, pattern: '^[a-f0-9]{64}$', description: 'Hash of the canonical bundle manifest.' }
+        objects: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/ArtifactObject' } }
+    ArtifactBundle:
+      type: object
+      required: [id, projectId, flowKey, revision, displayName, contentSha256, state, createdBy, createdAt, sealedAt]
+      properties:
+        id: { $ref: '#/components/schemas/ArtifactBundleId' }
+        projectId: { $ref: '#/components/schemas/ProjectId' }
+        flowKey: { type: string }
+        revision: { type: integer, minimum: 1 }
+        displayName: { type: string }
+        contentSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        state: { type: string, enum: [uploading, sealed] }
+        createdBy: { type: string, description: 'Verified FuzeFront actor subject.' }
+        createdAt: { type: string, format: date-time }
+        sealedAt: { type: string, format: date-time, nullable: true }
+        objects: { type: array, items: { $ref: '#/components/schemas/ArtifactObject' } }
     DetectedService:
       type: object
       required: [name, openapi, featureCount]
