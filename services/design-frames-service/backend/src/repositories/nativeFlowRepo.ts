@@ -3,6 +3,7 @@ import { fromUuid, mintId, toUuid, type EntityId } from '../lib/identity';
 import { ConflictError, NotFoundError, ValidationError } from '../lib/errors';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
 import type { ReqLogger } from '../lib/logger';
+import { enqueueEvent, FUZE_X_EVENT_TOPICS, makeEvent, type EventContext } from '../lib/events';
 
 interface FlowRow {
   id: string;
@@ -115,7 +116,7 @@ export async function getNativeFlow(projectId: EntityId<'project'>, flowId: Enti
   return toFlowDTO(await requireNativeFlow(projectId, flowId, log));
 }
 
-export async function createNativeFlow(projectId: EntityId<'project'>, input: NativeFlowCreate, createdBy: string, log: ReqLogger): Promise<{ flow: NativeFlowDTO; revision: FlowDocumentRevisionDTO }> {
+export async function createNativeFlow(projectId: EntityId<'project'>, input: NativeFlowCreate, createdBy: string, log: ReqLogger, eventContext?: EventContext): Promise<{ flow: NativeFlowDTO; revision: FlowDocumentRevisionDTO }> {
   return withTransaction(async (client) => {
     const project = await client.query('select id from design_frames.project where id = $1 for update', [toUuid(projectId)]);
     if (!project.rows.length) throw new NotFoundError(`project '${projectId}' not found`);
@@ -132,7 +133,9 @@ export async function createNativeFlow(projectId: EntityId<'project'>, input: Na
          values ($1,1,$2::jsonb,$3,$4) returning *`,
         [toUuid(id), JSON.stringify(input.document), input.message, createdBy]
       );
-      return { flow: toFlowDTO(inserted.rows[0]), revision: toRevisionDTO(revision.rows[0]) };
+      const result = { flow: toFlowDTO(inserted.rows[0]), revision: toRevisionDTO(revision.rows[0]) };
+      if (eventContext) await enqueueEvent(client, result.flow.id, makeEvent(FUZE_X_EVENT_TOPICS.flowCreated, eventContext, { projectId: result.flow.projectId, flowId: result.flow.id, flowKey: result.flow.key, revision: result.revision.revision }));
+      return result;
     } catch (error) {
       if ((error as { code?: string }).code === '23505') throw new ConflictError(`a flow with key '${input.key}' already exists in this project`);
       throw error;
@@ -168,7 +171,7 @@ export async function listNativeFlowRevisions(projectId: EntityId<'project'>, fl
 export async function appendNativeFlowRevision(
   projectId: EntityId<'project'>, flowId: EntityId<'flow'>,
   input: { expectedRevision: number; document: Record<string, unknown>; message: string | null },
-  createdBy: string, log: ReqLogger
+  createdBy: string, log: ReqLogger, eventContext?: EventContext
 ): Promise<FlowDocumentRevisionDTO> {
   return withTransaction(async (client) => {
     const flow = await client.query<FlowRow>(
@@ -185,6 +188,8 @@ export async function appendNativeFlowRevision(
        values ($1,$2,$3::jsonb,$4,$5) returning *`,
       [toUuid(flowId), current + 1, JSON.stringify(input.document), input.message, createdBy]
     );
-    return toRevisionDTO(rows[0]);
+    const result = toRevisionDTO(rows[0]);
+    if (eventContext) await enqueueEvent(client, flowId, makeEvent(FUZE_X_EVENT_TOPICS.flowRevisionCreated, eventContext, { projectId, flowId, revision: result.revision, message: result.message }));
+    return result;
   }, log);
 }

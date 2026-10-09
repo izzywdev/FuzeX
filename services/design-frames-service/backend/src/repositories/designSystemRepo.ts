@@ -4,6 +4,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../lib/errors';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
 import type { ReqLogger } from '../lib/logger';
 import type { DesignSystemComponent, DesignSystemRevisionInput } from '../lib/designSystem';
+import { enqueueEvent, FUZE_X_EVENT_TOPICS, makeEvent, type EventContext } from '../lib/events';
 
 interface RevisionRow {
   project_id: string;
@@ -65,7 +66,7 @@ export async function listDesignSystemRevisions(
 }
 
 export async function createDesignSystemRevision(
-  projectId: EntityId<'project'>, input: DesignSystemRevisionInput, createdBy: string, log: ReqLogger
+  projectId: EntityId<'project'>, input: DesignSystemRevisionInput, createdBy: string, log: ReqLogger, eventContext?: EventContext
 ): Promise<DesignSystemRevisionDTO> {
   return withTransaction(async (client) => {
     // Serialize all writers for this project, including the very first revision.
@@ -86,6 +87,8 @@ export async function createDesignSystemRevision(
       [toUuid(projectId), currentRevision + 1, input.name, input.description,
         JSON.stringify(input.tokens), JSON.stringify(input.components), createdBy]
     );
-    return toDTO(rows[0]);
+    const result = toDTO(rows[0]);
+    if (eventContext) await enqueueEvent(client, projectId, makeEvent(FUZE_X_EVENT_TOPICS.designSystemRevisionCreated, eventContext, { projectId, revision: result.revision }));
+    return result;
   }, log);
 }

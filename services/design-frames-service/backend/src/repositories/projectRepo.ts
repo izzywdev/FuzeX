@@ -1,10 +1,11 @@
 // projectRepo.ts — design_frames.project (fxdf_prj_*).
 
-import { query } from '../lib/db';
+import { query, withTransaction } from '../lib/db';
 import { mintId, toUuid, fromUuid, type EntityId } from '../lib/identity';
 import { ConflictError, NotFoundError } from '../lib/errors';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
 import type { ReqLogger } from '../lib/logger';
+import { enqueueEvent, FUZE_X_EVENT_TOPICS, makeEvent, type EventContext } from '../lib/events';
 
 export interface ProjectRow {
   id: string;
@@ -52,15 +53,18 @@ export interface ProjectCreateInput {
   sourceRepo?: string | null;
 }
 
-export async function createProject(input: ProjectCreateInput, log: ReqLogger): Promise<ProjectDTO> {
+export async function createProject(input: ProjectCreateInput, log: ReqLogger, eventContext?: EventContext): Promise<ProjectDTO> {
   const id = mintId('project');
-  const { rows } = await query<ProjectRow>(
+  return withTransaction(async (client) => {
+  const { rows } = await client.query<ProjectRow>(
     `insert into design_frames.project (id, name, description, source_repo)
      values ($1, $2, $3, $4) returning *`,
     [toUuid(id), input.name, input.description ?? null, input.sourceRepo ?? null],
-    log
   );
-  return toProjectDTO(rows[0]);
+  const project = toProjectDTO(rows[0]);
+  if (eventContext) await enqueueEvent(client, project.id, makeEvent(FUZE_X_EVENT_TOPICS.projectCreated, eventContext, { projectId: project.id, name: project.name, sourceRepo: project.sourceRepo }));
+  return project;
+  }, log);
 }
 
 export interface ProjectRepositoryDTO {
@@ -89,16 +93,20 @@ export async function listProjectRepositories(id: EntityId<'project'>, log: ReqL
 }
 
 export async function connectRepository(
-  projectId: EntityId<'project'>, repository: string, framesPath: string, log: ReqLogger
+  projectId: EntityId<'project'>, repository: string, framesPath: string, log: ReqLogger, eventContext?: EventContext
 ): Promise<ProjectRepositoryDTO> {
   const id = mintId('project');
   try {
-    const { rows } = await query<ProjectRepositoryRow>(
+    return await withTransaction(async (client) => {
+    const { rows } = await client.query<ProjectRepositoryRow>(
       `insert into design_frames.project_repository (id, project_id, repository, frames_path)
        values ($1, $2, $3, $4) returning *`,
-      [toUuid(id), toUuid(projectId), repository, framesPath], log
+      [toUuid(id), toUuid(projectId), repository, framesPath]
     );
-    return toProjectRepositoryDTO(rows[0]);
+    const connected = toProjectRepositoryDTO(rows[0]);
+    if (eventContext) await enqueueEvent(client, projectId, makeEvent(FUZE_X_EVENT_TOPICS.repositoryConnected, eventContext, { projectId, repository: connected.repository, framesPath: connected.framesPath }));
+    return connected;
+    }, log);
   } catch (err) {
     if ((err as { code?: string }).code === '23505') {
       throw new ConflictError(`repository '${repository}' is already connected to an App`);
@@ -146,7 +154,7 @@ export interface ProjectPatchInput {
 export async function patchProject(
   id: EntityId<'project'>,
   patch: ProjectPatchInput,
-  log: ReqLogger
+  log: ReqLogger, eventContext?: EventContext
 ): Promise<ProjectDTO> {
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -167,13 +175,16 @@ export async function patchProject(
     return getProject(id, log);
   }
   values.push(toUuid(id));
-  const { rows } = await query<ProjectRow>(
+  return withTransaction(async (client) => {
+  const { rows } = await client.query<ProjectRow>(
     `update design_frames.project set ${sets.join(', ')} where id = $${i} returning *`,
     values,
-    log
   );
   if (!rows[0]) throw new NotFoundError(`project '${id}' not found`);
-  return toProjectDTO(rows[0]);
+  const project = toProjectDTO(rows[0]);
+  if (eventContext) await enqueueEvent(client, project.id, makeEvent(FUZE_X_EVENT_TOPICS.projectUpdated, eventContext, { projectId: project.id, changed: Object.keys(patch).filter((key) => patch[key as keyof ProjectPatchInput] !== undefined) }));
+  return project;
+  }, log);
 }
 
 export async function listProjects(page: PageParams, log: ReqLogger): Promise<Page<ProjectDTO>> {

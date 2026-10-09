@@ -3,10 +3,11 @@
 // (db/migrations/0002_functions.sql) rejects UPDATE/DELETE at the database
 // layer, so this repository never attempts either.
 
-import { query } from '../lib/db';
+import { query, withTransaction } from '../lib/db';
 import { mintId, toUuid, fromUuid, type EntityId } from '../lib/identity';
 import type { ReqLogger } from '../lib/logger';
 import { buildPage, decodeCursor, type Page, type PageParams } from '../lib/pagination';
+import { enqueueEvent, FUZE_X_EVENT_TOPICS, makeEvent, type EventContext } from '../lib/events';
 
 export type Decision = 'approve' | 'reject';
 export type ActorType = 'user' | 'agent';
@@ -65,15 +66,18 @@ export interface InsertApprovalInput {
   reason: string | null;
 }
 
-export async function insertApproval(input: InsertApprovalInput, log: ReqLogger): Promise<ApprovalRow> {
+export async function insertApproval(input: InsertApprovalInput, log: ReqLogger, eventContext?: EventContext): Promise<ApprovalRow> {
   const id = mintId('approval');
-  const { rows } = await query<ApprovalRow>(
+  return withTransaction(async (client) => {
+  const { rows } = await client.query<ApprovalRow>(
     `insert into design_frames.approval (id, flow_id, decision, actor_ref, actor_type, content_stamp, reason)
      values ($1, $2, $3, $4, $5, $6, $7) returning *`,
     [toUuid(id), input.flowId, input.decision, input.actorRef, input.actorType, input.contentStamp, input.reason],
-    log
   );
-  return rows[0];
+  const result = rows[0];
+  if (eventContext) await enqueueEvent(client, input.flowId, makeEvent(FUZE_X_EVENT_TOPICS.flowApprovalRecorded, eventContext, { flowId: input.flowId, approvalId: fromUuid('approval', result.id), decision: result.decision, contentStamp: result.content_stamp }));
+  return result;
+  }, log);
 }
 
 export async function latestApproval(flowId: string, log: ReqLogger): Promise<ApprovalRow | null> {

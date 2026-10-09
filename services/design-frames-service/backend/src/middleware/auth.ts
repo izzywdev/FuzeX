@@ -43,6 +43,8 @@ import {
 import type { NextFunction, Request, Response } from 'express';
 import { ForbiddenError, UnauthorizedError } from '../lib/errors';
 import { checkFuzeFrontAuthorization } from '../lib/fuzefrontAuthz';
+import type { EventContext } from '../lib/events';
+import type { LoggedRequest } from '../lib/logger';
 
 /** Requests that have passed `requireAuthForWrites` carry the verified caller. */
 export interface AuthenticatedRequest extends Request {
@@ -101,6 +103,13 @@ export function authenticatedActor(req: AuthenticatedRequest): { actorRef: strin
   if (req.delegatedIdentity) return { actorRef: req.delegatedIdentity.subject, actorType: 'user' };
   if (req.machineIdentity) return { actorRef: req.machineIdentity.subject, actorType: 'agent' };
   throw new UnauthorizedError('a verified caller is required');
+}
+
+/** Tenant and actor are copied only from the identity FuzeFront verified. */
+export function authenticatedEventContext(req: AuthenticatedRequest): EventContext {
+  const identity = req.delegatedIdentity ?? req.machineIdentity;
+  if (!identity?.tenantId) throw new UnauthorizedError('a verified FuzeFront tenant identity is required');
+  return { tenantId: identity.tenantId, actor: authenticatedActor(req).actorRef, correlationId: (req as LoggedRequest).reqId ?? null };
 }
 
 /**
