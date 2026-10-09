@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseArtifactBundleCreate, assertSafeArtifactPath } = require('../dist/lib/artifactBundle.js');
-const { S3CompatibleArtifactObjectStore, artifactStorageConfigFromEnv } = require('../dist/lib/artifactStore.js');
+const { S3CompatibleArtifactObjectStore, artifactStorageConfigFromEnv, createArtifactObjectStoreFromEnv } = require('../dist/lib/artifactStore.js');
 
 const digest = 'a'.repeat(64);
 const input = () => ({ flowKey: 'checkout', displayName: 'Checkout', contentSha256: digest, objects: [
@@ -42,5 +42,16 @@ test('S3-compatible storage adapter is injected and never requires browser crede
   assert.deepEqual(
     artifactStorageConfigFromEnv({ ARTIFACT_STORAGE_CONFIG: JSON.stringify({ provider: 's3', bucket: 'private-fuzex', region: 'eu', endpoint: 'https://minio.internal', accessKey: 'not-returned' }) }),
     { provider: 's3', bucket: 'private-fuzex', region: 'eu', endpoint: 'https://minio.internal' }
+  );
+  const configured = createArtifactObjectStoreFromEnv({
+    ARTIFACT_STORAGE_CONFIG: JSON.stringify({
+      provider: 's3', bucket: 'private-fuzex', region: 'eu', endpoint: 'https://minio.internal',
+      accessKeyId: 'workload-only', secretAccessKey: 'not-an-account-key', forcePathStyle: true,
+    }),
+  });
+  assert.deepEqual(configured.config, { provider: 's3', bucket: 'private-fuzex', region: 'eu', endpoint: 'https://minio.internal' });
+  assert.throws(
+    () => createArtifactObjectStoreFromEnv({ ARTIFACT_STORAGE_CONFIG: JSON.stringify({ provider: 's3', bucket: 'b', region: 'eu' }) }),
+    /workload accessKeyId and secretAccessKey/
   );
 });

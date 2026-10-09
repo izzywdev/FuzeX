@@ -8,6 +8,7 @@ import type { ClientConfig, QueryConfig } from 'pg';
 import { requestLogger } from './lib/logger';
 import { getPool } from './lib/db';
 import { DATA_DIR, getFrame } from './lib/fileStore';
+import { getArtifactObjectStore } from './lib/artifactStore';
 import { requireAuthForWrites, requireFuzeFrontAuthorization } from './middleware/auth';
 import { requireLifecycleBoundary } from './middleware/lifecycleBoundary';
 import { errorHandler } from './lib/errors';
@@ -65,6 +66,13 @@ export function createApp() {
       await Promise.all([
         getPool().query(readinessQuery),
         mkdir(DATA_DIR, { recursive: true }).then(() => access(DATA_DIR, constants.R_OK | constants.W_OK)),
+        // The object store does not grant bucket-list permission, so readiness
+        // validates the sealed runtime contract without probing/listing objects.
+        // The first artifact operation proves provider reachability and is
+        // logged as a normal request failure if the provider is unavailable.
+        process.env.ARTIFACT_STORAGE_REQUIRED === 'true'
+          ? Promise.resolve(getArtifactObjectStore()).then(() => undefined)
+          : Promise.resolve(),
       ]);
       res.status(200).json({ status: 'ready' });
     } catch {
