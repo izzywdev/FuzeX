@@ -862,6 +862,53 @@ paths:
         '400': { $ref: '#/components/responses/Validation' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/projects/{id}/trace-links:
+    parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+    get:
+      summary: List durable FuzePlan/FuzeQuality decision evidence for an App
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Attach immutable business or QA evidence to a UX target
+      description: External URLs are display-only evidence locators and are never fetched by FuzeX.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TraceLinkCreate' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/TraceLink' } } } }
+        '400': { $ref: '#/components/responses/Validation' }
+
+  /api/v1/projects/{id}/design-policies:
+    parameters: [{ $ref: '#/components/parameters/ProjectIdPath' }]
+    get:
+      summary: List scoped design-agent policies; approvedOnly=true is safe for agent consumption
+      security: [{ bearerAuth: [] }]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Draft a natural-language design policy linked to decision evidence
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DesignPolicyCreate' } } }
+      responses: { '201': { description: Created } }
+
+  /api/v1/projects/{id}/design-policies/{policyId}/approve:
+    post:
+      summary: Explicitly approve a draft policy for AI-agent consumption
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ProjectIdPath' }
+        - name: policyId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^fxdf_dpl_[0-9a-hjkmnp-tv-z]+$' }
+      responses:
+        '200': { description: Approved }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/discussions:
     get:
       summary: List discussions for one polymorphic target (paginated)
@@ -1239,6 +1286,45 @@ components:
     FrameRefId:
       type: string
       pattern: '^fxdf_frm_[0-9a-hjkmnp-tv-z]+$'
+    TraceLinkId:
+      type: string
+      pattern: '^fxdf_trc_[0-9a-hjkmnp-tv-z]+$'
+    DesignPolicyId:
+      type: string
+      pattern: '^fxdf_dpl_[0-9a-hjkmnp-tv-z]+$'
+    TraceTargetType:
+      type: string
+      enum: [project, flow, frame, element, designSystemComponent]
+    TraceLinkCreate:
+      type: object
+      additionalProperties: false
+      required: [targetType, targetRef, sourceSystem, sourceKind, externalRef]
+      properties:
+        targetType: { $ref: '#/components/schemas/TraceTargetType' }
+        targetRef: { type: string }
+        selector: { type: string, nullable: true }
+        contentStamp: { type: string, nullable: true, pattern: '^[0-9a-f]{64}$' }
+        sourceSystem: { type: string, enum: [fuzeplan, fuzequality, fuzex] }
+        sourceKind: { type: string, enum: [requirement, llm_quote, test_case, design_decision] }
+        externalRef: { type: string }
+        externalUrl: { type: string, format: uri, nullable: true }
+        quoteText: { type: string, nullable: true }
+        metadata: { type: object }
+    TraceLink:
+      allOf: [{ $ref: '#/components/schemas/TraceLinkCreate' }]
+      properties:
+        id: { $ref: '#/components/schemas/TraceLinkId' }
+    DesignPolicyCreate:
+      type: object
+      additionalProperties: false
+      required: [targetType, targetRef, title, instruction]
+      properties:
+        targetType: { $ref: '#/components/schemas/TraceTargetType' }
+        targetRef: { type: string }
+        selector: { type: string, nullable: true }
+        title: { type: string }
+        instruction: { type: string, description: Natural-language semantic UX instruction, not CSS-only guidance. }
+        traceLinkIds: { type: array, items: { $ref: '#/components/schemas/TraceLinkId' } }
       example: fxdf_frm_01h455vb4pex5vsknk084sn02q
 
     PageInfo:

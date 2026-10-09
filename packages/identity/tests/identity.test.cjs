@@ -90,6 +90,9 @@ test('registry declares the fxdf_* lifecycle and draft-generation entity prefixe
     discussion: 'fxdf_dsc',
     comment: 'fxdf_cmt',
     generation: 'fxdf_gen',
+    artifactBundle: 'fxdf_bnd',
+    traceLink: 'fxdf_trc',
+    designPolicy: 'fxdf_dpl',
   });
 });
 
