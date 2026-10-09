@@ -204,4 +204,3 @@ export async function startLifecycleConsumer(): Promise<LifecycleConsumer | null
 }
 
 export const __testables = { applyEvent, orgCreated, orgDeleted, userDeleted, membership, authorizationChanged };
-

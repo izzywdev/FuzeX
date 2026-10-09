@@ -26,4 +26,3 @@ export async function requireLifecycleBoundary(req: AuthenticatedRequest, _res: 
     next();
   } catch (error) { next(error); }
 }
-

@@ -60,4 +60,3 @@ CREATE TABLE IF NOT EXISTS design_frames.authorization_change_epoch (
 
 COMMENT ON COLUMN design_frames.project.organization_id IS
   'Verified FuzeFront tenant id at workspace creation; never client supplied. Legacy unscoped projects require an explicit administrative migration before tenancy is enforced.';
-
