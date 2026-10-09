@@ -20,11 +20,17 @@ import { AppWorkspace } from './components/AppWorkspace'
  * This is the module the host loads at runtime — exposed as
  * './DesignFramesApp' (see vite.config.ts).
  */
-export default function App() {
+/**
+ * `getToken` is supplied by FuzeFront's federated-app host.  It is used only
+ * for same-origin JSON API calls to the FuzeFront proxy; it is never placed in
+ * a URL, forwarded to the preview iframe, or persisted by this remote.
+ */
+export default function App({ getToken }: { getToken?: () => string | null } = {}) {
   const [route, setRoute] = useState(() => readRouteFromHash())
-  // Browser writes use FuzeFront's same-origin delegated proxy. A workload
-  // credential is never rendered, stored, or accepted from the browser.
-  const token = ''
+  // The host supplies a user session token for the same-origin FuzeFront
+  // proxy. That proxy exchanges it for a short-lived workload + delegation
+  // pair server-side; a workload credential is never rendered or stored here.
+  const token = getToken?.() ?? ''
 
   useEffect(() => {
     const onHashChange = () => setRoute(readRouteFromHash())

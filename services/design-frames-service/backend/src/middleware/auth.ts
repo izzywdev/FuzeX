@@ -42,11 +42,14 @@ import {
 } from '@izzywdev/fuzefront-service-auth';
 import type { NextFunction, Request, Response } from 'express';
 import { ForbiddenError, UnauthorizedError } from '../lib/errors';
+import { checkFuzeFrontAuthorization } from '../lib/fuzefrontAuthz';
 
 /** Requests that have passed `requireAuthForWrites` carry the verified caller. */
 export interface AuthenticatedRequest extends Request {
   machineIdentity?: MachineIdentity;
   delegatedIdentity?: MachineIdentity;
+  /** Raw workload bearer, retained only server-side for Security authz checks. */
+  machineToken?: string;
 }
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -123,7 +126,10 @@ export function requireAuthForWrites(
 ): void {
   const isWrite = WRITE_METHODS.has(req.method);
   const hasDelegation = req.headers['x-fuze-delegation'] !== undefined;
-  if (!isWrite && !hasDelegation) {
+  // API reads with a bearer must be introspected too.  The authorization
+  // middleware mounted after this one requires that verified identity; only
+  // public non-API routes (health and sandboxed previews) bypass both gates.
+  if (!isWrite && !hasDelegation && !req.headers.authorization) {
     next();
     return;
   }
@@ -163,11 +169,12 @@ export function requireAuthForWrites(
       } else if (machineClaims.tokenKind === 'fuze-delegation') {
         next(new ForbiddenError('Forbidden — delegation requires its authenticated service actor'));
         return;
-      } else if (!identity.scopes.includes(REQUIRED_SCOPE)) {
-        next(new ForbiddenError(`Forbidden — token lacks the ${REQUIRED_SCOPE} scope`));
+      } else if (!identity.scopes.includes(isWrite ? REQUIRED_SCOPE : READ_SCOPE)) {
+        next(new ForbiddenError(`Forbidden — token lacks the ${isWrite ? REQUIRED_SCOPE : READ_SCOPE} scope`));
         return;
       }
       req.machineIdentity = identity;
+      req.machineToken = token;
       next();
     })
     .catch(() => {
@@ -178,4 +185,52 @@ export function requireAuthForWrites(
     });
 }
 
-export const __testables = { extractBearer, verifier, REQUIRED_SCOPE };
+type NativeDecision = { resource: { type: string; key: string }; action: string };
+
+/** Map FuzeX's native routes to stable, product-namespaced Security resources. */
+function nativeDecision(req: Request): NativeDecision {
+  const path = req.path;
+  const method = req.method;
+  const project = /^\/api\/v1\/projects\/([^/]+)/.exec(path)?.[1];
+  const feature = /^\/api\/v1\/features\/([^/]+)/.exec(path)?.[1];
+  const discussion = /^\/api\/v1\/discussions\/([^/]+)/.exec(path)?.[1];
+  const key = project ? `project:${project}` : feature ? `feature:${feature}` : discussion ? `discussion:${discussion}` : 'catalog';
+  const action =
+    method === 'GET' || method === 'HEAD' ? 'read' :
+    /\/flows\/[^/]+\/(approve|reject)$/.test(path) ? 'approve' :
+    /^\/api\/v1\/discussions(?:\/|$)/.test(path) || /\/comments$/.test(path) ? 'comment' :
+    /\/generations(?:\/|$)/.test(path) ? 'generate' : 'manage';
+  return { resource: { type: 'fuzex.DesignWorkspace', key }, action };
+}
+
+/**
+ * Require a live FuzeFront Security decision for every native design API call.
+ * The decision is always evaluated as the delegated human where present;
+ * automation is evaluated as its verified machine identity.  FuzeX never
+ * interprets roles, memberships, or policy data locally.
+ */
+export function requireFuzeFrontAuthorization(
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction
+): void {
+  const identity = req.delegatedIdentity ?? req.machineIdentity;
+  const tenant = identity?.tenantId;
+  if (!identity || !req.machineToken || !tenant) {
+    next(new UnauthorizedError('a verified FuzeFront tenant identity is required'));
+    return;
+  }
+  const decision = nativeDecision(req);
+  checkFuzeFrontAuthorization({
+    bearerToken: req.machineToken,
+    subject: identity.subject,
+    tenant,
+    resource: decision.resource,
+    action: decision.action,
+  }).then((allowed) => {
+    if (!allowed) next(new ForbiddenError('Forbidden — FuzeFront Security denied this FuzeX operation'));
+    else next();
+  }).catch(() => next(new ForbiddenError('Forbidden — FuzeFront Security decision is unavailable')));
+}
+
+export const __testables = { extractBearer, verifier, REQUIRED_SCOPE, nativeDecision };
