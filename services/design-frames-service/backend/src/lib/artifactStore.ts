@@ -68,6 +68,22 @@ export class S3CompatibleArtifactObjectStore implements ArtifactObjectStore {
 }
 
 export function artifactStorageConfigFromEnv(env = process.env): ArtifactStorageConfig {
+  // FuzeInfra delivers this one opaque JSON value through a strictly-scoped
+  // SealedSecret. Credentials, if present, remain available only to the
+  // server-side runtime adapter; this parser returns no credential material.
+  const handoff = env.ARTIFACT_STORAGE_CONFIG;
+  if (handoff) {
+    let parsed: Record<string, unknown>;
+    try { parsed = JSON.parse(handoff) as Record<string, unknown>; }
+    catch { throw new Error('ARTIFACT_STORAGE_CONFIG must be valid JSON from the FuzeInfra object-storage handoff'); }
+    const config = {
+      ARTIFACT_STORAGE_PROVIDER: parsed.provider,
+      ARTIFACT_STORAGE_BUCKET: parsed.bucket,
+      ARTIFACT_STORAGE_REGION: parsed.region,
+      ARTIFACT_STORAGE_ENDPOINT: parsed.endpoint,
+    } as Record<string, string | undefined>;
+    return artifactStorageConfigFromEnv(config);
+  }
   const provider = env.ARTIFACT_STORAGE_PROVIDER;
   const bucket = env.ARTIFACT_STORAGE_BUCKET;
   const region = env.ARTIFACT_STORAGE_REGION;

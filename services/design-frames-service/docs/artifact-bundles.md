@@ -8,7 +8,13 @@ metadata, never artifact bytes.
 
 ## Runtime contract
 
-The backend requires a server-side S3-compatible adapter:
+The backend consumes the FuzeInfra-owned object-storage handoff. Its preferred
+runtime input is one opaque JSON value, `ARTIFACT_STORAGE_CONFIG`, delivered in
+the `fuzex-artifact-storage` SealedSecret. FuzeX never provisions a bucket or
+holds the FuzeInfra/Contabo account credential. The generic allocation contract
+lives in FuzeInfra's `governance/object-storage-allocations.json`.
+
+For local development only, the backend can instead be configured directly:
 
 ```text
 ARTIFACT_STORAGE_PROVIDER=s3

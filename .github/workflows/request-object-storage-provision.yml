@@ -1,0 +1,39 @@
+name: Request service object-storage provisioning
+
+# The product requests only a named, predeclared runtime allocation. FuzeInfra
+# owns provider selection, bucket/principal creation, credential sealing and
+# delivery; this workflow cannot carry an S3 credential or mutate storage.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: request-object-storage-provision
+  cancel-in-progress: false
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint FuzeInfra-scoped fuze-agent token
+        id: infra_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.FUZE_AGENT_APP_ID }}
+          private-key: ${{ secrets.FUZE_AGENT_APP_PRIVATE_KEY }}
+          owner: izzywdev
+          repositories: FuzeInfra
+          permission-contents: write
+      - name: Request generic private object-storage allocation
+        env:
+          GH_TOKEN: ${{ steps.infra_token.outputs.token }}
+          REQUESTER: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "${GH_TOKEN:-}" ] || { echo '::error::Could not mint FuzeInfra App token'; exit 1; }
+          jq -nc --arg requester "$REQUESTER" \
+            '{event_type:"provision-service-object-storage",client_payload:{allocationId:"fuzex-artifact-storage",consumerRepo:$requester}}' \
+            | gh api --method POST repos/izzywdev/FuzeInfra/dispatches --input -
