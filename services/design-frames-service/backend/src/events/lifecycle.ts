@@ -41,9 +41,12 @@ export function parseLifecycleEnvelope(raw: unknown, expectedTopic?: LifecycleTo
   return value as Envelope;
 }
 
-function payload<T>(event: Envelope, validate: (p: Record<string, unknown>) => p is T): T {
+function payload<T>(event: Envelope, validate: (p: Record<string, unknown>) => boolean): T {
   if (!validate(event.payload)) throw new Error(`invalid ${event.topic} payload`);
-  return event.payload;
+  // `payload` is an object by Envelope construction. The individual validators
+  // above establish the narrower wire type; keeping this cast here avoids
+  // claiming that every declared event payload has an arbitrary string index.
+  return event.payload as T;
 }
 const orgCreated = (p: Record<string, unknown>): p is OrgCreated => uuid(p.organizationId) && nonEmpty(p.slug) && nonEmpty(p.name) && typeof p.isActive === 'boolean';
 const orgDeleted = (p: Record<string, unknown>): p is OrgDeleted => uuid(p.organizationId) && (p.cascade === 'soft' || p.cascade === 'hard');
@@ -81,7 +84,7 @@ async function applyEvent(client: PoolClient, event: Envelope): Promise<void> {
   if (!(await once(client, event))) return;
   switch (event.topic) {
     case 'identity.org.created': {
-      const p = payload(event, orgCreated);
+      const p = payload<OrgCreated>(event, orgCreated);
       await client.query(
         `insert into design_frames.tenant_lifecycle_state (organization_id, slug, name, is_active, deleted_at, deleted_cascade, last_event_at)
          values ($1, $2, $3, $4, null, null, $5::timestamptz)
@@ -95,7 +98,7 @@ async function applyEvent(client: PoolClient, event: Envelope): Promise<void> {
       return;
     }
     case 'identity.org.deleted': {
-      const p = payload(event, orgDeleted);
+      const p = payload<OrgDeleted>(event, orgDeleted);
       await ensureTenant(client, p.organizationId, event.occurredAt);
       await client.query(
         `update design_frames.tenant_lifecycle_state set is_active = false, deleted_at = $2::timestamptz, deleted_cascade = $3,
@@ -110,13 +113,13 @@ async function applyEvent(client: PoolClient, event: Envelope): Promise<void> {
       return;
     }
     case 'identity.user.deleted': {
-      const p = payload(event, userDeleted);
+      const p = payload<UserDeleted>(event, userDeleted);
       await client.query(`update design_frames.tenant_membership_state set is_active = false, last_event_at = $2::timestamptz, updated_at = now()
         where user_id = $1 and last_event_at <= $2::timestamptz`, [p.userId, event.occurredAt]);
       return;
     }
     case 'identity.membership.added': {
-      const p = payload(event, membership);
+      const p = payload<Membership>(event, membership);
       await ensureTenant(client, p.organizationId, event.occurredAt);
       if (await isHardDeleted(client, p.organizationId)) return;
       await client.query(
@@ -130,7 +133,7 @@ async function applyEvent(client: PoolClient, event: Envelope): Promise<void> {
       return;
     }
     case 'identity.membership.removed': {
-      const p = payload(event, membership);
+      const p = payload<Membership>(event, membership);
       await ensureTenant(client, p.organizationId, event.occurredAt);
       await client.query(
         `insert into design_frames.tenant_membership_state (organization_id, user_id, role, is_active, last_event_at)
@@ -143,7 +146,7 @@ async function applyEvent(client: PoolClient, event: Envelope): Promise<void> {
       return;
     }
     case 'identity.authorization.changed': {
-      const p = payload(event, authorizationChanged);
+      const p = payload<AuthorizationChanged>(event, authorizationChanged);
       await ensureTenant(client, p.organizationId, event.occurredAt);
       // Never turn this event into a local grant. A removal is a safe local
       // revocation; additions/role changes stay evidence only while FuzeFront

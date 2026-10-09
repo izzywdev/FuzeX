@@ -5,6 +5,7 @@ import { Router, type Request } from 'express';
 import * as discussionRepo from '../repositories/discussionRepo';
 import * as commentRepo from '../repositories/commentRepo';
 import * as frameRefRepo from '../repositories/frameRefRepo';
+import * as featureRepo from '../repositories/featureRepo';
 import * as fileStore from '../lib/fileStore';
 import {
   assertRef,
