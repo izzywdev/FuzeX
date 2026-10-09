@@ -14,6 +14,8 @@ import { parseDesignSystemRevision, parseRevisionNumber } from '../lib/designSys
 import { NotFoundError, UnauthorizedError } from '../lib/errors';
 import * as nativeFlowRepo from '../repositories/nativeFlowRepo';
 import { parseNativeFlowCreate, parseNativeFlowRevision, parseRevisionNumber as parseNativeFlowRevisionNumber } from '../lib/nativeFlow';
+import * as traceabilityRepo from '../repositories/traceabilityRepo';
+import { parsePolicy, parseTraceLink, parseTarget } from '../lib/traceability';
 
 export const projectsRouter = Router();
 
@@ -167,6 +169,41 @@ projectsRouter.post('/:id/flows/:flowId/revisions', async (req: AuthenticatedReq
   const actor = authenticatedActor(req).actorRef;
   if (!actor) throw new UnauthorizedError('a verified caller is required');
   res.status(201).json(await nativeFlowRepo.appendNativeFlowRevision(projectId, flowId, parseNativeFlowRevision(req.body), actor, log(req)));
+});
+
+// Traceability remains local and durable: FuzePlan and FuzeQuality references
+// are evidence locators, not browser-supplied URLs for this service to fetch.
+projectsRouter.get('/:id/trace-links', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const query = req.query as Record<string, unknown>;
+  const target = query.targetType === undefined && query.targetRef === undefined ? {} : parseTarget({ targetType: query.targetType, targetRef: query.targetRef, selector: null, contentStamp: null });
+  res.status(200).json({ items: await traceabilityRepo.listTraceLinks(id, target, log(req)) });
+});
+
+projectsRouter.post('/:id/trace-links', async (req: AuthenticatedRequest, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const actor = authenticatedActor(req).actorRef;
+  res.status(201).json(await traceabilityRepo.createTraceLink(id, parseTraceLink(req.body), actor, log(req)));
+});
+
+projectsRouter.get('/:id/design-policies', async (req, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const approvedOnly = (req.query as Record<string, unknown>).approvedOnly;
+  if (approvedOnly !== undefined && approvedOnly !== 'true' && approvedOnly !== 'false') throw new ValidationError('approvedOnly must be true or false');
+  res.status(200).json({ items: await traceabilityRepo.listPolicies(id, approvedOnly === 'true', log(req)) });
+});
+
+projectsRouter.post('/:id/design-policies', async (req: AuthenticatedRequest, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const actor = authenticatedActor(req).actorRef;
+  res.status(201).json(await traceabilityRepo.createPolicy(id, parsePolicy(req.body), actor, log(req)));
+});
+
+projectsRouter.post('/:id/design-policies/:policyId/approve', async (req: AuthenticatedRequest, res) => {
+  const id = assertRef('project', req.params.id) as EntityId<'project'>;
+  const policyId = assertRef('designPolicy', req.params.policyId) as EntityId<'designPolicy'>;
+  const actor = authenticatedActor(req).actorRef;
+  res.status(200).json(await traceabilityRepo.approvePolicy(id, policyId, actor, log(req)));
 });
 
 // Projects are the hosted application workspaces. Counts use the authoritative

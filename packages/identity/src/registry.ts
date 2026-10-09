@@ -22,6 +22,8 @@ export const ENTITY_PREFIXES = {
   comment: 'fxdf_cmt',
   generation: 'fxdf_gen',
   artifactBundle: 'fxdf_bnd',
+  traceLink: 'fxdf_trc',
+  designPolicy: 'fxdf_dpl',
 } as const;
 
 export type EntityType = keyof typeof ENTITY_PREFIXES;
