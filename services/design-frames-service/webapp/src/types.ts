@@ -194,6 +194,30 @@ export interface DetectedService {
   featureCount: number
 }
 
+export type TraceTargetType = 'project' | 'flow' | 'frame' | 'element' | 'designSystemComponent'
+export interface TraceLink {
+  id: string
+  projectId: string
+  target: { targetType: TraceTargetType; targetRef: string; selector: string | null; contentStamp: string | null }
+  source: { system: 'fuzeplan' | 'fuzequality' | 'fuzex'; kind: 'requirement' | 'llm_quote' | 'test_case' | 'design_decision'; externalRef: string; externalUrl: string | null; quoteText: string | null; metadata: Record<string, unknown> }
+  createdBy: string
+  createdAt: string
+}
+export interface DesignPolicy {
+  id: string
+  projectId: string
+  target: { targetType: TraceTargetType; targetRef: string; selector: string | null }
+  title: string
+  instruction: string
+  status: 'draft' | 'approved' | 'superseded'
+  traceLinkIds: string[]
+  createdBy: string
+  createdAt: string
+  approvedBy: string | null
+  approvedAt: string | null
+  supersedesId: string | null
+}
+
 export interface GenerationBrief {
   flowId: string
   title: string
