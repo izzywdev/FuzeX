@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Button, StatusCallout } from '@izzywdev/fuzefront-design-system'
 import { ApiError, createDesignSystemRevision, listDesignSystemRevisions } from '../api'
 import type { DesignSystemComponent, DesignSystemRevision } from '../types'
+import { reviewStatusLabel, summarizeComponentReviews, validateDesignSystemDraft } from '../designSystemWorkspace'
 import { actionsStyle, errorMessage, fieldStyle, gridStyle, panelStyle } from './workspaceStyles'
 
 export function DesignSystemPanel({ projectId, latest, token, onChanged }: { projectId: string; latest: DesignSystemRevision | null; token: string; onChanged: (revision: DesignSystemRevision) => void }) {
@@ -53,8 +54,8 @@ export function DesignSystemPanel({ projectId, latest, token, onChanged }: { pro
     try {
       const parsedTokens: unknown = nextComponents ? latest!.tokens : JSON.parse(tokens)
       const parsedComponents = nextComponents || components
-      if (!parsedTokens || typeof parsedTokens !== 'object' || Array.isArray(parsedTokens)) throw new Error('Tokens must be a JSON object.')
-      if (!Array.isArray(parsedComponents)) throw new Error('Components must be a JSON array.')
+      const validation = validateDesignSystemDraft(nextComponents ? latest!.name : name, parsedTokens, parsedComponents)
+      if (validation) throw new Error(validation)
       const revision = await createDesignSystemRevision(projectId, {
         expectedRevision: latest?.revision || 0,
         name: nextComponents ? latest!.name : name.trim(),
@@ -79,8 +80,12 @@ export function DesignSystemPanel({ projectId, latest, token, onChanged }: { pro
     }))
   }
 
+  const reviewSummary = selected ? summarizeComponentReviews(selected.components) : null
+  const selectedIsCurrent = selected?.revision === latest?.revision
+
   return <section aria-labelledby="design-system-heading" style={panelStyle}>
-    <h3 id="design-system-heading">Design system & components</h3>
+    <h3 id="design-system-heading">Design system</h3>
+    <p>Manage reusable tokens and components as immutable revisions. Component decisions create a new revision, preserving the reviewed history.</p>
     {error && <StatusCallout tone="error" title="Design system request failed">{error}</StatusCallout>}
     {loading && <p role="status">Loading design system revisions…</p>}
     {!latest && <p>No design system has been registered for this app. Create its first revision to inventory tokens and components.</p>}
@@ -88,29 +93,34 @@ export function DesignSystemPanel({ projectId, latest, token, onChanged }: { pro
       {[...history].reverse().map((revision) => <option key={revision.revision} value={revision.revision}>Revision {revision.revision} · {new Date(revision.createdAt).toLocaleString()}{revision.revision === latest?.revision ? ' · Current' : ''}</option>)}
     </select></label>}
     {selected && <>
-      <h4>{selected.name}</h4><p>{selected.description}</p>
-      {selected.revision !== latest?.revision && <p role="status">Viewing an earlier revision. Component decisions can be made on the current revision.</p>}
+      <h4>{selected.name}</h4><p>{selected.description || 'No description provided.'}</p>
+      {!selectedIsCurrent && <StatusCallout tone="info" title="Historical revision">Viewing revision {selected.revision}. Select the current revision to review components or create a successor.</StatusCallout>}
+      <div aria-label="Component review summary" style={gridStyle}>
+        <p style={panelStyle}><strong>{reviewSummary?.approved || 0}</strong><br />Approved</p>
+        <p style={panelStyle}><strong>{reviewSummary?.draft || 0}</strong><br />Awaiting review</p>
+        <p style={panelStyle}><strong>{reviewSummary?.rejected || 0}</strong><br />Changes requested</p>
+      </div>
       <p>{selected.components.length} components · Revision {selected.revision}</p>
       <div style={gridStyle}>{selected.components.map((component) => <article key={component.key} style={panelStyle}>
-        <h4>{component.name} · {component.status || 'draft'}</h4>
+        <h4>{component.name} · {reviewStatusLabel(component.status)}</h4>
         <code>{component.key}</code><p>{component.description}</p>
         {component.usage && <p>Usage: {component.usage}</p>}
         {component.selector && <p>Selector: <code>{component.selector}</code></p>}
         {component.reason && <p>Rejection reason: {component.reason}</p>}
-        {selected.revision === latest?.revision && <>
-          <label>Rejection reason for {component.name}<input style={fieldStyle} value={reasons[component.key] || ''} onChange={(e) => setReasons({ ...reasons, [component.key]: e.target.value })} /></label>
+        {selectedIsCurrent && <>
+          <label>Review note for {component.name}<input style={fieldStyle} placeholder="Required when requesting changes" value={reasons[component.key] || ''} onChange={(e) => setReasons({ ...reasons, [component.key]: e.target.value })} /></label>
           <div style={actionsStyle}>
-            <Button size="sm" disabled={busy || !token.trim() || component.status === 'approved'} onClick={() => review(component, 'approved')}>Approve</Button>
-            <Button size="sm" variant="secondary" disabled={busy || !token.trim() || !reasons[component.key]?.trim()} onClick={() => review(component, 'rejected')}>Reject</Button>
-            {component.status && component.status !== 'draft' && <Button size="sm" variant="secondary" disabled={busy || !token.trim()} onClick={() => review(component, 'draft')}>Return to draft</Button>}
+            <Button size="sm" disabled={busy || component.status === 'approved'} onClick={() => review(component, 'approved')}>Approve</Button>
+            <Button size="sm" variant="secondary" disabled={busy || !reasons[component.key]?.trim()} onClick={() => review(component, 'rejected')}>Request changes</Button>
+            {component.status && component.status !== 'draft' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => review(component, 'draft')}>Return to draft</Button>}
           </div>
         </>}
       </article>)}</div>
       {selected.components.length === 0 && <p>No components in this revision.</p>}
-      <details><summary>Design tokens</summary><pre style={{ overflowX: 'auto' }}>{JSON.stringify(selected.tokens, null, 2)}</pre></details>
+      <details><summary>Design tokens ({Object.keys(selected.tokens).length})</summary><pre style={{ overflowX: 'auto' }}>{JSON.stringify(selected.tokens, null, 2)}</pre></details>
     </>}
-    <div style={actionsStyle}><Button variant="secondary" disabled={busy || !token.trim()} onClick={beginEdit}>{latest ? 'Create a design system revision' : 'Add design system'}</Button></div>
-    {!token.trim() && <p>Sign in with write access to edit the design system or review components.</p>}
+    <div style={actionsStyle}><Button variant="secondary" disabled={busy} onClick={beginEdit}>{latest ? 'Create a design system revision' : 'Add design system'}</Button></div>
+    <p>Changes are authorized by the FuzeFront security service and checked by the API.</p>
     {editing && <form onSubmit={(e) => { e.preventDefault(); void save() }} style={{ marginTop: '16px' }}>
       <fieldset disabled={busy} style={{ border: 0, padding: 0 }}>
         <legend>New revision based on {latest ? `revision ${latest.revision}` : 'an empty design system'}</legend>
