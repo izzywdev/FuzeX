@@ -92,9 +92,11 @@ project 1─N feature 1─N flow 1─N approval
 discussion 1─N comment
 ```
 
-- `feature.project_id` is a **nullable reference** (`fxdf_prj_*`) — a feature can
-  exist unassigned; assigning it is not identity. Surfaced as the optional
-  `projectId` on `POST /api/v1/features`.
+- `feature.project_id` remains a **nullable reference** (`fxdf_prj_*`) for
+  historical migration data, but hosted API-created features must be assigned
+  to an App owned by the verified tenant. Surfaced as the required `projectId`
+  on `POST /api/v1/features`; unassigned legacy rows are hidden until an
+  explicit administrative migration attaches them.
 - `frame_ref.flow_id` is nullable: a frame may belong to the feature but to no
   single flow.
 

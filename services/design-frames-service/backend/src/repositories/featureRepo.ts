@@ -30,6 +30,43 @@ export async function findFeatureBySlug(slug: string, log: ReqLogger): Promise<F
   return rows[0] ?? null;
 }
 
+/**
+ * Resolve a legacy feature only through an App workspace owned by the verified
+ * FuzeFront organization.  The content store is shared at the process level,
+ * so callers must never use a slug alone as an authorization boundary.
+ * Unassigned pre-tenancy imports are deliberately hidden until an explicit
+ * administrative migration attaches them to an App.
+ */
+export async function requireFeatureOwnedByOrganization(
+  slug: string,
+  organizationId: string,
+  log: ReqLogger,
+): Promise<FeatureRow> {
+  const { rows } = await query<FeatureRow>(
+    `select f.*
+       from design_frames.feature f
+       join design_frames.project p on p.id = f.project_id
+      where f.slug = $1 and p.organization_id = $2`,
+    [slug, organizationId],
+    log,
+  );
+  if (!rows[0]) throw new NotFoundError(`feature '${slug}' not found`);
+  return rows[0];
+}
+
+/** Only return feature slugs attached to an App owned by this organization. */
+export async function listFeatureSlugsByOrganization(organizationId: string, log: ReqLogger): Promise<string[]> {
+  const { rows } = await query<{ slug: string }>(
+    `select f.slug
+       from design_frames.feature f
+       join design_frames.project p on p.id = f.project_id
+      where p.organization_id = $1`,
+    [organizationId],
+    log,
+  );
+  return rows.map((row) => row.slug);
+}
+
 export async function createFeatureRow(
   slug: string,
   projectId: EntityId<'project'> | null,

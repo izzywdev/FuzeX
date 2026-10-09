@@ -5,7 +5,6 @@ import { Router, type Request } from 'express';
 import * as discussionRepo from '../repositories/discussionRepo';
 import * as commentRepo from '../repositories/commentRepo';
 import * as frameRefRepo from '../repositories/frameRefRepo';
-import { requireFeatureRowBySlug } from '../repositories/featureRepo';
 import * as fileStore from '../lib/fileStore';
 import {
   assertRef,
@@ -15,11 +14,11 @@ import {
   type DiscussionTargetType,
   type EntityId,
 } from '../lib/identity';
-import { NotFoundError, ValidationError } from '../lib/errors';
+import { NotFoundError, UnauthorizedError, ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import { query } from '../lib/db';
 import type { LoggedRequest } from '../lib/logger';
-import { authenticatedActor } from '../middleware/auth';
+import { authenticatedActor, type AuthenticatedRequest } from '../middleware/auth';
 
 export const discussionsRouter = Router();
 export const featureDiscussionsRouter = Router();
@@ -28,6 +27,44 @@ const VALID_TARGET_TYPES = new Set<DiscussionTargetType>(['project', 'feature', 
 
 function log(req: Request) {
   return (req as LoggedRequest).log!;
+}
+
+function verifiedOrganizationId(req: Request): string {
+  const auth = req as AuthenticatedRequest;
+  const identity = auth.delegatedIdentity ?? auth.machineIdentity;
+  if (!identity?.tenantId) throw new UnauthorizedError('a verified FuzeFront tenant identity is required');
+  return identity.tenantId;
+}
+
+/**
+ * Discussions are globally-addressable by TypeID, but the target they describe
+ * is not.  Keep the ownership check local as defense in depth alongside the
+ * live FuzeFront Security decision; never expose a target merely because its
+ * identifier is well formed.
+ */
+async function requireTenantTarget(
+  targetType: DiscussionTargetType,
+  targetRefUuid: string,
+  organizationId: string,
+  reqLog: ReturnType<typeof log>,
+): Promise<void> {
+  const ownershipSql: Record<DiscussionTargetType, string> = {
+    project: `select 1 from design_frames.project p where p.id = $1 and p.organization_id = $2`,
+    feature: `select 1 from design_frames.feature f join design_frames.project p on p.id = f.project_id where f.id = $1 and p.organization_id = $2`,
+    flow: `select 1 from design_frames.flow f
+             left join design_frames.project direct_project on direct_project.id = f.project_id
+             left join design_frames.feature feature on feature.id = f.feature_id
+             left join design_frames.project feature_project on feature_project.id = feature.project_id
+            where f.id = $1 and (direct_project.organization_id = $2 or feature_project.organization_id = $2)`,
+    frame: `select 1 from design_frames.frame_ref r join design_frames.feature f on f.id = r.feature_id join design_frames.project p on p.id = f.project_id where r.id = $1 and p.organization_id = $2`,
+    element: `select 1 from design_frames.frame_ref r join design_frames.feature f on f.id = r.feature_id join design_frames.project p on p.id = f.project_id where r.id = $1 and p.organization_id = $2`,
+  };
+  const { rows } = await query<{ exists: boolean }>(
+    `select exists(${ownershipSql[targetType]}) as exists`,
+    [targetRefUuid, organizationId],
+    reqLog,
+  );
+  if (!rows[0]?.exists) throw new NotFoundError(`${targetType} not found`);
 }
 
 // Client authorType remains accepted for compatibility, but cannot override
@@ -60,6 +97,7 @@ discussionsRouter.get('/', async (req, res) => {
   const resolvedParam = req.query.resolved;
   const resolved = resolvedParam === undefined ? null : resolvedParam === 'true';
   const page = parsePageParams(req.query as Record<string, unknown>);
+  await requireTenantTarget(targetType as DiscussionTargetType, targetRefUuid, verifiedOrganizationId(req), log(req));
   const result = await discussionRepo.listByTarget(targetType as DiscussionTargetType, targetRefUuid, resolved, page, log(req));
   res.status(200).json({ items: result.items.map(toWireDiscussion), page: result.page });
 });
@@ -97,6 +135,7 @@ discussionsRouter.post('/', async (req, res) => {
   // for a well-formed-but-nonexistent reference.
   const exists = await targetExists(targetType as DiscussionTargetType, targetRefUuid, log(req));
   if (!exists) throw new NotFoundError(`${targetType} '${body.targetRef}' not found`);
+  await requireTenantTarget(targetType as DiscussionTargetType, targetRefUuid, verifiedOrganizationId(req), log(req));
 
   if (targetType === 'element') {
     await assertSelectorExistsInRevision(targetRefUuid, body.targetSelector as string, log(req));
@@ -157,6 +196,7 @@ async function targetExists(targetType: DiscussionTargetType, uuid: string, reqL
 discussionsRouter.get('/:id', async (req, res) => {
   const id = assertRef('discussion', req.params.id) as EntityId<'discussion'>;
   const row = await discussionRepo.getDiscussion(id, log(req));
+  await requireTenantTarget(row.target_type, row.target_ref, verifiedOrganizationId(req), log(req));
   const comments = await commentRepo.listByDiscussion(row.id, log(req));
   res.status(200).json({ ...toWireDiscussion(row), comments: comments.map(commentRepo.toCommentDTO) });
 });
@@ -166,6 +206,8 @@ discussionsRouter.patch('/:id', async (req, res) => {
   const id = assertRef('discussion', req.params.id) as EntityId<'discussion'>;
   const body = (req.body ?? {}) as Record<string, unknown>;
   if (typeof body.resolved !== 'boolean') throw new ValidationError('resolved (boolean) is required');
+  const existing = await discussionRepo.getDiscussion(id, log(req));
+  await requireTenantTarget(existing.target_type, existing.target_ref, verifiedOrganizationId(req), log(req));
   const row = await discussionRepo.setResolved(id, body.resolved, log(req));
   res.status(200).json(toWireDiscussion(row));
 });
@@ -174,6 +216,7 @@ discussionsRouter.patch('/:id', async (req, res) => {
 discussionsRouter.post('/:id/comments', async (req, res) => {
   const id = assertRef('discussion', req.params.id) as EntityId<'discussion'>;
   const discussion = await discussionRepo.getDiscussion(id, log(req));
+  await requireTenantTarget(discussion.target_type, discussion.target_ref, verifiedOrganizationId(req), log(req));
   const body = (req.body ?? {}) as Record<string, unknown>;
   // openapi.yaml CommentCreate: additionalProperties:false, properties
   // body/parentCommentId/authorType ONLY — no `authorRef` (see
@@ -209,7 +252,7 @@ discussionsRouter.post('/:id/comments', async (req, res) => {
 
 // GET /api/v1/features/:slug/discussions — convenience wrapper.
 featureDiscussionsRouter.get('/:slug/discussions', async (req, res) => {
-  const featureRow = await requireFeatureRowBySlug(req.params.slug, log(req));
+  const featureRow = await featureRepo.requireFeatureOwnedByOrganization(req.params.slug, verifiedOrganizationId(req), log(req));
   const resolvedParam = req.query.resolved;
   const resolved = resolvedParam === undefined ? null : resolvedParam === 'true';
   const page = parsePageParams(req.query as Record<string, unknown>);

@@ -14,7 +14,7 @@ import * as flowRepo from '../repositories/flowRepo';
 import * as approvalRepo from '../repositories/approvalRepo';
 import * as projectRepo from '../repositories/projectRepo';
 import * as frameRefRepo from '../repositories/frameRefRepo';
-import { ConflictError, ValidationError } from '../lib/errors';
+import { ConflictError, UnauthorizedError, ValidationError } from '../lib/errors';
 import { parsePageParams } from '../lib/pagination';
 import type { LoggedRequest } from '../lib/logger';
 import { authenticatedActor, authenticatedEventContext, type AuthenticatedRequest } from '../middleware/auth';
@@ -23,6 +23,13 @@ export const featuresRouter = Router();
 
 function log(req: Request) {
   return (req as LoggedRequest).log!;
+}
+
+function verifiedOrganizationId(req: Request): string {
+  const auth = req as AuthenticatedRequest;
+  const identity = auth.delegatedIdentity ?? auth.machineIdentity;
+  if (!identity?.tenantId) throw new UnauthorizedError('a verified FuzeFront tenant identity is required');
+  return identity.tenantId;
 }
 
 async function latestApprovalsAsProjectionInput(
@@ -78,26 +85,27 @@ function suppliedStamp(body: Record<string, unknown>): string | undefined {
 }
 
 // GET /api/v1/features — byte-compatible with v0.1.0 (unpaginated {features:[...]}).
-featuresRouter.get('/', async (_req, res) => {
-  res.status(200).json({ features: await fileStore.listFeatures() });
+featuresRouter.get('/', async (req, res) => {
+  const owned = new Set(await featureRepo.listFeatureSlugsByOrganization(verifiedOrganizationId(req), log(req)));
+  const features = (await fileStore.listFeatures()).filter((feature) => owned.has(feature.slug));
+  res.status(200).json({ features });
 });
 
-// POST /api/v1/features — extended with optional projectId (a REFERENCE, not identity).
+// POST /api/v1/features — projectId is a tenant-owned reference, not identity.
 featuresRouter.post('/', async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const { slug, name, description, designSystem, entry, sourceRepo, projectId } = body;
   if (!slug || typeof slug !== 'string') throw new ValidationError('slug is required');
 
-  let projectRefId: EntityId<'project'> | null = null;
-  if (projectId !== undefined && projectId !== null) {
-    try {
-      projectRefId = assertRef('project', projectId);
-    } catch {
-      throw new ValidationError('projectId is not a valid project id');
-    }
-    // Existence check — a reference to a project that does not exist is a 404, not a silent orphan.
-    await projectRepo.getProject(projectRefId, log(req));
+  let projectRefId: EntityId<'project'>;
+  try {
+    projectRefId = assertRef('project', projectId);
+  } catch {
+    throw new ValidationError('projectId is required and must be a valid project id');
   }
+  // A feature's content lives in a shared store.  New features therefore
+  // require an App owner and that owner must belong to the verified tenant.
+  await projectRepo.getProject(projectRefId, log(req), verifiedOrganizationId(req));
 
   // openapi.yaml's feature-create body requires ONLY `slug`; `description`
   // is optional. lib/schema.js's validateManifest, however, requires the
@@ -126,6 +134,16 @@ featuresRouter.post('/', async (req, res) => {
   const feature = await fileStore.createFeature(slug, manifest);
   await featureRepo.createFeatureRow(slug, projectRefId, (sourceRepo as string | null) || null, log(req));
   res.status(201).json({ slug: feature.slug, manifest: feature.manifest });
+});
+
+// Every slug-addressed legacy route is constrained through its owning App.
+// This must be registered before the first `/:slug` route so neither a frame
+// nor an immutable revision can be read or mutated cross-tenant.
+featuresRouter.use('/:slug', async (req, _res, next) => {
+  try {
+    await featureRepo.requireFeatureOwnedByOrganization(req.params.slug, verifiedOrganizationId(req), log(req));
+    next();
+  } catch (error) { next(error); }
 });
 
 // GET /api/v1/features/:slug — manifest + frame contents, with
