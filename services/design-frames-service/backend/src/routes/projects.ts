@@ -21,10 +21,17 @@ function log(req: Request) {
   return (req as LoggedRequest).log!;
 }
 
+function verifiedOrganizationId(req: Request): string {
+  const auth = req as AuthenticatedRequest;
+  const identity = auth.delegatedIdentity ?? auth.machineIdentity;
+  if (!identity?.tenantId) throw new UnauthorizedError('a verified FuzeFront tenant identity is required');
+  return identity.tenantId;
+}
+
 // GET /api/v1/projects
 projectsRouter.get('/', async (req, res) => {
   const page = parsePageParams(req.query as Record<string, unknown>);
-  const result = await projectRepo.listProjects(page, log(req));
+  const result = await projectRepo.listProjects(page, log(req), verifiedOrganizationId(req));
   res.status(200).json(result);
 });
 
@@ -47,10 +54,22 @@ projectsRouter.post('/', async (req: Request, res: Response) => {
   if (errors.length) throw new ValidationError('invalid project create body', errors);
 
   const created = await projectRepo.createProject(
-    { name: body.name as string, description: (body.description as string | null) ?? null, sourceRepo: (body.sourceRepo as string | null) ?? null },
+    { name: body.name as string, description: (body.description as string | null) ?? null, sourceRepo: (body.sourceRepo as string | null) ?? null, organizationId: verifiedOrganizationId(req) },
     log(req), authenticatedEventContext(req as AuthenticatedRequest)
   );
   res.status(201).json(created);
+});
+
+// Project-owned operations must never cross a tenant boundary. FuzeFront is
+// still consulted for every request; this local ownership check protects the
+// FuzeX data plane even if a caller presents an otherwise valid cross-tenant
+// identifier. Legacy projects with no verified owner are intentionally hidden.
+projectsRouter.use('/:id', async (req, _res, next) => {
+  try {
+    const id = assertRef('project', req.params.id) as EntityId<'project'>;
+    await projectRepo.getProject(id, log(req), verifiedOrganizationId(req));
+    next();
+  } catch (error) { next(error); }
 });
 
 // GET /api/v1/projects/:id

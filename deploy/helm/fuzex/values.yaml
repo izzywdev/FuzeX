@@ -161,6 +161,13 @@ webappMfe:
 postgresTier:
   enabled: false
   logLevel: info
+  lifecycleEvents:
+    # Explicit opt-in: a deployment without a FuzeInfra Kafka endpoint must
+    # not create a retrying broker client. When enabled, FuzeX consumes only
+    # identity lifecycle and security.policy.changed revocation events.
+    enabled: false
+    brokers: kafka.fuzeinfra.svc.cluster.local:9092
+    groupId: fuzex-lifecycle-v1
 
   image:
     repository: ghcr.io/izzywdev/fuzex-design-frames-postgres-tier
