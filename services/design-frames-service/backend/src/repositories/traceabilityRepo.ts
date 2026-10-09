@@ -16,7 +16,18 @@ function policyDTO(row: PolicyRow): DesignPolicyDTO { return { id: fromUuid('des
 async function requireProject(projectId: EntityId<'project'>, log: ReqLogger): Promise<void> { const result = await query('select id from design_frames.project where id = $1', [toUuid(projectId)], log); if (!result.rows.length) throw new NotFoundError(`project '${projectId}' not found`); }
 async function requireTargetInProject(projectId: EntityId<'project'>, target: TraceTarget, log: ReqLogger): Promise<void> {
   if (target.targetType === 'project') { if (target.targetRef !== projectId) throw new NotFoundError('trace target project does not match the route project'); return; }
-  if (target.targetType === 'designSystemComponent') return; // Component keys are namespaced by this project in the stored row.
+  if (target.targetType === 'designSystemComponent') {
+    // A free-form key would create orphaned evidence. The latest immutable
+    // Design System snapshot is the authoritative component catalogue.
+    const component = await query(
+      `select 1 from design_frames.design_system_revision
+       where project_id = $1 and components @> $2::jsonb
+       order by revision desc limit 1`,
+      [toUuid(projectId), JSON.stringify([{ key: target.targetRef }])], log
+    );
+    if (!component.rows.length) throw new NotFoundError('design-system component does not belong to this project');
+    return;
+  }
   const text = target.targetType === 'flow' || target.targetType === 'flowStep'
     ? 'select 1 from design_frames.flow where id = $1 and project_id = $2'
     : `select 1 from design_frames.frame_ref r join design_frames.flow f on f.id = r.flow_id left join design_frames.feature ft on ft.id = f.feature_id where r.id = $1 and (f.project_id = $2 or ft.project_id = $2)`;
