@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { assertRef, type EntityId } from '../lib/identity';
-import { ConflictError, NotFoundError, ValidationError } from '../lib/errors';
+import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '../lib/errors';
 import type { LoggedRequest } from '../lib/logger';
 import { authenticatedActor, type AuthenticatedRequest } from '../middleware/auth';
 import * as projectRepo from '../repositories/projectRepo';
@@ -13,6 +13,12 @@ import { getArtifactObjectStore } from '../lib/artifactStore';
 export const artifactBundlesRouter = Router({ mergeParams: true });
 export const artifactBundlePreviewRouter = Router();
 function log(req: Request) { return (req as LoggedRequest).log!; }
+function verifiedOrganizationId(req: Request): string {
+  const auth = req as AuthenticatedRequest;
+  const identity = auth.delegatedIdentity ?? auth.machineIdentity;
+  if (!identity?.tenantId) throw new UnauthorizedError('a verified FuzeFront tenant identity is required');
+  return identity.tenantId;
+}
 function pathParam(req: Request, name: string): string {
   const value = (req.params as Record<string, string | string[] | undefined>)[name];
   if (typeof value === 'string') return value;
@@ -84,10 +90,15 @@ artifactBundlesRouter.post('/:bundleId/seal', async (req: AuthenticatedRequest, 
 // authN/authZ gateway evaluates Permit/OPAL before this route. The route only
 // serves objects declared in a sealed bundle, so no key/prefix enumeration is
 // possible even from a compromised UI.
-artifactBundlePreviewRouter.get('/:bundleId/objects/*path', async (req, res) => {
+artifactBundlePreviewRouter.get('/:bundleId/objects/*path', async (req: AuthenticatedRequest, res) => {
   const bundleId = assertRef('artifactBundle', pathParam(req, 'bundleId')) as EntityId<'artifactBundle'>;
   const bundle = await bundleRepo.getArtifactBundle(bundleId, log(req));
   if (bundle.state !== 'sealed') throw new NotFoundError(`artifact bundle '${bundleId}' not found`);
+  // This relay is not nested below /projects/:id, so enforce the same
+  // database ownership boundary before exposing bytes from private storage.
+  // FuzeFront Security still makes the live authorization decision; this
+  // prevents a broadly-authorized catalog read from crossing tenant data.
+  await projectRepo.getProject(bundle.projectId, log(req), verifiedOrganizationId(req));
   const object = await bundleRepo.findArtifactObject(bundleId, assertSafeArtifactPath(pathParam(req, 'path')), log(req));
   const stored = await getArtifactObjectStore().getObject(object.storageKey);
   res.status(200).type(stored.contentType).setHeader('X-Content-Type-Options', 'nosniff').send(Buffer.from(stored.body));

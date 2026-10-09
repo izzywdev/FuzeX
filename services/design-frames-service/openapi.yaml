@@ -21,7 +21,7 @@ info:
       date: '2026-08-19'
       changes:
         - 'ADD /api/v1/projects CRUD (create mints fxdf_prj_*, additionalProperties:false, no client id) + GET /{id}/features.'
-        - 'ADD optional projectId reference on POST /api/v1/features (reference, not identity).'
+        - 'ADD projectId reference on POST /api/v1/features (reference, not identity); required so legacy content is tenant-owned.'
         - 'ADD GET /api/v1/features/{slug}/flows/{flowId}/approvals — append-only decision history (paginated).'
         - 'EXTEND approve/reject bodies: both accept optional contentStamp; reject now requires reason; responses echo the created approval id (fxdf_apr_*) + stamp. Old {approvedBy}-only approve callers still work.'
         - 'ADD discussions: POST/GET/GET{id}/PATCH{id} + POST {id}/comments, and convenience GET /api/v1/features/{slug}/discussions. Polymorphic target carries its type (targetType + targetRef).'
@@ -93,7 +93,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [slug]
+              required: [slug, projectId]
               properties:
                 slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
                 name: { type: string }
@@ -103,12 +103,12 @@ paths:
                 sourceRepo: { type: string, nullable: true, description: "Which consuming product these frames are for, e.g. 'FuzeFront'." }
                 projectId:
                   allOf: [ { $ref: '#/components/schemas/ProjectId' } ]
-                  nullable: true
                   description: >
-                    OPTIONAL reference to an existing project (fxdf_prj_*) this
+                    Required reference to an existing project (fxdf_prj_*) this
                     feature belongs to. A reference to an entity that already
                     exists, NOT identity (identifier-standard §1): the feature's
-                    own id is still minted server-side. Omitted/null = unassigned.
+                    own id is still minted server-side. This binds shared legacy
+                    content to the verified tenant's App workspace.
 
   /api/v1/features/{slug}:
     get:
