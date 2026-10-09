@@ -23,11 +23,17 @@ ARTIFACT_STORAGE_REGION=<region>
 ARTIFACT_STORAGE_ENDPOINT=https://minio.<cluster-domain>   # MinIO only
 ```
 
-The adapter is injected at the composition root via
-`configureArtifactObjectStore()`. It must obtain credentials using the cluster
-workload identity / secret-sealing path. Do not add `AWS_ACCESS_KEY_ID`, a
-MinIO access key, a static secret, a public bucket policy, or browser-presigned
-credentials to FuzeX.
+The hosted adapter creates a server-only S3 client from that sealed JSON at
+startup on first artifact access. The JSON includes a dedicated bucket-scoped
+workload `accessKeyId` and `secretAccessKey` (and optional `sessionToken` and
+`forcePathStyle` for MinIO). They are never returned by the API or written to
+logs. `configureArtifactObjectStore()` remains available only for tests or a
+controlled runtime composition override.
+
+Do not add a provider-account key, a public bucket policy, `ListBucket`, or
+browser-presigned credentials to FuzeX. The workload policy is limited to the
+declared FuzeX bucket and the backend exposes only put/head/get for immutable,
+database-declared object keys.
 
 Each bundle maps to a deterministic private key prefix:
 

@@ -50,6 +50,12 @@ validate both sides of this cutover, namespaced routes and unsafe-values guards.
    provisioned database and least-privilege role, and contains no production
    credentials in Git. Verify FuzeFront introspection is reachable and an
    authorized machine identity has `fuzex:frames:write`.
+   When private artifact bundles are enabled, also verify the FuzeInfra-produced
+   `fuzex-artifact-storage/ARTIFACT_STORAGE_CONFIG` Secret exists and contains a
+   dedicated bucket-scoped workload principal. The API never receives an object
+   store account key and the browser never receives a bucket URL or presigned
+   credential. A configured store is validated by `/ready` without requiring
+   `ListBucket`; upload and sealed-preview smoke tests prove provider reachability.
 3. Record database backup and PVC snapshot identifiers. Record a restore rehearsal
    that reads the same historical frame, discussion thread and review decision.
 4. Enable the lifecycle tier only after storage, migration and authentication

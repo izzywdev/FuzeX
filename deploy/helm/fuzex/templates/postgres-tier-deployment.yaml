@@ -1,3 +1,6 @@
+{{- if and .Values.enabled .Values.artifactStorage.enabled (not .Values.postgresTier.enabled) }}
+{{- fail "artifactStorage.enabled requires postgresTier.enabled: private artifact bundles are served only by the hosted lifecycle API" }}
+{{- end }}
 {{- if and .Values.enabled .Values.postgresTier.enabled }}
 {{- if not .Values.persistence.enabled }}
 {{- fail "postgresTier.enabled requires persistence.enabled: immutable frame snapshots need durable storage" }}
@@ -124,6 +127,8 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.artifactStorage.secret.name | quote }}
                   key: {{ .Values.artifactStorage.secret.key | quote }}
+            - name: ARTIFACT_STORAGE_REQUIRED
+              value: "true"
             {{- end }}
           readinessProbe:
             httpGet: { path: /ready, port: http }

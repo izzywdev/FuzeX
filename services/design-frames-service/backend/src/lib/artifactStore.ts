@@ -8,12 +8,32 @@
 // mounted short-lived credential provider).
 
 import { NotFoundError } from './errors';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  type S3ClientConfig,
+} from '@aws-sdk/client-s3';
 
 export interface ArtifactStorageConfig {
   provider: 's3';
   endpoint?: string;
   region: string;
   bucket: string;
+}
+
+/**
+ * FuzeInfra seals this complete, server-only runtime contract.  The public
+ * `ArtifactStorageConfig` intentionally omits the credential so routes and
+ * logs cannot accidentally serialize it.  This is a workload principal, not
+ * the provider account credential and it receives no ListBucket permission.
+ */
+interface ArtifactStorageRuntimeConfig extends ArtifactStorageConfig {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  forcePathStyle?: boolean;
 }
 
 export interface StoredArtifact {
@@ -67,6 +87,67 @@ export class S3CompatibleArtifactObjectStore implements ArtifactObjectStore {
   }
 }
 
+/**
+ * Server-side AWS-SDK adapter that works with AWS S3 and MinIO/S3-compatible
+ * endpoints.  It intentionally exposes only put/head/get; there is no list,
+ * delete, presigning, or caller-controlled bucket/key capability.
+ */
+export class AwsSdkS3CompatibleClient implements S3CompatibleClient {
+  private readonly client: S3Client;
+  constructor(private readonly runtime: ArtifactStorageRuntimeConfig) {
+    const config: S3ClientConfig = {
+      region: runtime.region,
+      credentials: {
+        accessKeyId: runtime.accessKeyId,
+        secretAccessKey: runtime.secretAccessKey,
+        ...(runtime.sessionToken ? { sessionToken: runtime.sessionToken } : {}),
+      },
+      ...(runtime.endpoint ? { endpoint: runtime.endpoint } : {}),
+      ...(runtime.forcePathStyle === undefined ? {} : { forcePathStyle: runtime.forcePathStyle }),
+    };
+    this.client = new S3Client(config);
+  }
+
+  async put(input: { bucket: string; key: string; body: Uint8Array; contentType: string; sha256: string }): Promise<void> {
+    await this.client.send(new PutObjectCommand({
+      Bucket: input.bucket,
+      Key: input.key,
+      Body: input.body,
+      ContentType: input.contentType,
+      Metadata: { sha256: input.sha256 },
+    }));
+  }
+
+  async head(input: { bucket: string; key: string }): Promise<{ sha256?: string } | null> {
+    try {
+      const result = await this.client.send(new HeadObjectCommand({ Bucket: input.bucket, Key: input.key }));
+      return { sha256: result.Metadata?.sha256 };
+    } catch (error) {
+      if (isMissingObject(error)) return null;
+      throw error;
+    }
+  }
+
+  async get(input: { bucket: string; key: string }): Promise<StoredArtifact | null> {
+    try {
+      const result = await this.client.send(new GetObjectCommand({ Bucket: input.bucket, Key: input.key }));
+      if (!result.Body) return null;
+      return {
+        body: await result.Body.transformToByteArray(),
+        contentType: result.ContentType ?? 'application/octet-stream',
+      };
+    } catch (error) {
+      if (isMissingObject(error)) return null;
+      throw error;
+    }
+  }
+}
+
+function isMissingObject(error: unknown): boolean {
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return candidate?.name === 'NoSuchKey' || candidate?.name === 'NotFound' || candidate?.$metadata?.httpStatusCode === 404;
+}
+
 export function artifactStorageConfigFromEnv(env = process.env): ArtifactStorageConfig {
   // FuzeInfra delivers this one opaque JSON value through a strictly-scoped
   // SealedSecret. Credentials, if present, remain available only to the
@@ -97,15 +178,43 @@ export function artifactStorageConfigFromEnv(env = process.env): ArtifactStorage
   return { provider, bucket, region, ...(endpoint ? { endpoint } : {}) };
 }
 
+function artifactStorageRuntimeConfigFromEnv(env = process.env): ArtifactStorageRuntimeConfig {
+  const handoff = env.ARTIFACT_STORAGE_CONFIG;
+  if (!handoff) {
+    throw new Error('ARTIFACT_STORAGE_CONFIG is required for the hosted private artifact store');
+  }
+  let parsed: Record<string, unknown>;
+  try { parsed = JSON.parse(handoff) as Record<string, unknown>; }
+  catch { throw new Error('ARTIFACT_STORAGE_CONFIG must be valid JSON from the FuzeInfra object-storage handoff'); }
+  const config = artifactStorageConfigFromEnv({ ARTIFACT_STORAGE_CONFIG: handoff });
+  const accessKeyId = parsed.accessKeyId;
+  const secretAccessKey = parsed.secretAccessKey;
+  const sessionToken = parsed.sessionToken;
+  const forcePathStyle = parsed.forcePathStyle;
+  if (typeof accessKeyId !== 'string' || !accessKeyId || typeof secretAccessKey !== 'string' || !secretAccessKey) {
+    throw new Error('ARTIFACT_STORAGE_CONFIG requires a dedicated workload accessKeyId and secretAccessKey');
+  }
+  if (sessionToken !== undefined && (typeof sessionToken !== 'string' || !sessionToken)) {
+    throw new Error('ARTIFACT_STORAGE_CONFIG sessionToken must be a non-empty string when supplied');
+  }
+  if (forcePathStyle !== undefined && typeof forcePathStyle !== 'boolean') {
+    throw new Error('ARTIFACT_STORAGE_CONFIG forcePathStyle must be boolean when supplied');
+  }
+  return { ...config, accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}), ...(forcePathStyle === undefined ? {} : { forcePathStyle }) };
+}
+
 let objectStore: ArtifactObjectStore | null = null;
 
 export function configureArtifactObjectStore(store: ArtifactObjectStore): void { objectStore = store; }
 
+/** Constructs the private server-side adapter without exposing its credential. */
+export function createArtifactObjectStoreFromEnv(env = process.env): ArtifactObjectStore {
+  const runtime = artifactStorageRuntimeConfigFromEnv(env);
+  return new S3CompatibleArtifactObjectStore(runtime, new AwsSdkS3CompatibleClient(runtime));
+}
+
 export function getArtifactObjectStore(): ArtifactObjectStore {
   if (objectStore) return objectStore;
-  // A missing adapter is intentionally an error on first use rather than a
-  // local-disk/public-bucket fallback. Config is read only to produce a useful
-  // operator error and never includes credentials.
-  objectStore = new UnconfiguredArtifactObjectStore(artifactStorageConfigFromEnv());
+  objectStore = createArtifactObjectStoreFromEnv();
   return objectStore;
 }
