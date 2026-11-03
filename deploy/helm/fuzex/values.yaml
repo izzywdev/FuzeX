@@ -251,3 +251,44 @@ federatedMount:
   path: /apps/fuzex
   # Stripped once by Traefik. Generic /api routes belong to the portal.
   apiPath: /apps/fuzex/api
+
+# -- a2a: per-product A2A pod. Serves the design-review Agent Card to callers
+# (FuzeFront) via the shared ghcr.io/izzywdev/fuze-a2a image. Per-product variation
+# is config only — a single shared image serves both topologies.
+#
+# DISABLED until all three prerequisites are satisfied:
+#   1. a2a.auth.oidcIssuerUrl filled with FuzeFront's OIDC issuer and committed.
+#   2. a2a.image.tag pinned to a verified GHCR tag (resolve with gate_a2a.py once
+#      scripts/gate_a2a.py is vendored here — it is currently absent).
+#   3. The config.json schema in templates/a2a.yaml verified against
+#      fuzeagent/agent-templates/a2a/ (governance/a2a-runtime-standard.md is not
+#      vendored in this repo; consult FuzeAgent before enabling).
+#
+# inClusterUrl MUST point to THIS pod's own Service. The fuze-a2a image advertises
+# this URL in the Agent Card it publishes; a wrong value routes every caller to a
+# different pod while all health signals stay green (a2a-maintainer hard boundary).
+a2a:
+  enabled: false
+  image:
+    repository: ghcr.io/izzywdev/fuze-a2a
+    # TODO(a2a-maintainer): pin to a verified GHCR digest once gate_a2a.py is
+    # available to resolve the registry. "latest" is a stub only.
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8080
+  # Service DNS: {releaseName}-fuzex-a2a.{namespace}.svc.cluster.local
+  # With releaseName=fuzex (ArgoCD application.yaml) and namespace=fuzex this is:
+  inClusterUrl: http://fuzex-fuzex-a2a.fuzex.svc.cluster.local:8080
+  auth:
+    # TODO(operator): fill with FuzeFront's OIDC issuer URL before enabling.
+    # A blank issuer rejects every caller token and fails closed, which is safe
+    # but means the pod cannot respond to any A2A request until this is set.
+    oidcIssuerUrl: ""
+  tenants:
+    - repo: izzywdev/FuzeX
+      role: design-review
+      contextRoot: /repos/fuzex
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 256Mi }

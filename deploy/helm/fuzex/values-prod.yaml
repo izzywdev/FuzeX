@@ -138,3 +138,19 @@ postgresTier:
 federatedMount:
   enabled: true
   host: app.fuzefront.com
+
+# a2a prod overlay — stays disabled until prerequisites in values.yaml are met.
+# Flip enabled to true in a dedicated PR once:
+#   1. oidcIssuerUrl is confirmed with FuzeFront team and committed here.
+#   2. image.tag is pinned to a verified GHCR tag (not "latest").
+#   3. config.json schema in templates/a2a.yaml verified against FuzeAgent.
+a2a:
+  enabled: false
+  image:
+    # TODO(a2a-maintainer): pin to the same verified tag used in release.yml once
+    # gate_a2a.py is vendored and resolves the registry.
+    tag: "latest"
+    pullPolicy: Always
+  auth:
+    # TODO(operator): set to FuzeFront's OIDC issuer URL (e.g. https://auth.fuzefront.com/realms/fuzefront).
+    oidcIssuerUrl: ""
