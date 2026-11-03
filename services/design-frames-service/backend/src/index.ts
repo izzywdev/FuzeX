@@ -4,6 +4,7 @@
 // different from ../server.js's DESIGN_FRAMES_PORT (4400) so both can run
 // side by side during rollout (docs/postgres-tier.md "Migration path").
 
+import { telemetry } from './lib/telemetry';
 import { createApp } from './app';
 import { logger } from './lib/logger';
 import { closePool } from './lib/db';
@@ -34,6 +35,8 @@ export function start() {
     server.close(() => {
       Promise.all([Promise.resolve(stopOutboxRelay?.()), Promise.resolve(lifecycle?.disconnect())])
         .catch((err) => logger.error({ err }, 'error stopping FuzeX event relays'))
+        .then(() => telemetry.shutdown())
+        .catch((err) => logger.error({ err }, 'error flushing telemetry'))
         .then(() => closePool())
         .catch((err) => logger.error({ err }, 'error closing pg pool'))
         .finally(() => process.exit(0));

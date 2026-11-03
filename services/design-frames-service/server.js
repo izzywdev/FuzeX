@@ -25,6 +25,19 @@
  * reject actions) require a valid machine token.
  */
 
+// Telemetry first, so instrumentation patches node:http before it is required
+// (observability standard P25). Endpoint/sampling come from OTEL_* env.
+const { initTelemetry } = require('@izzywdev/fuzefront-telemetry');
+const telemetry = initTelemetry({
+  serviceName: process.env.OTEL_SERVICE_NAME || process.env.SERVICE_NAME || 'design-frames-service',
+  serviceVersion: process.env.npm_package_version,
+});
+const logger = require('pino')({
+  level: process.env.LOG_LEVEL || 'info',
+  redact: ['req.headers.authorization', 'req.headers.cookie', '*.token', '*.password', 'authorization'],
+  base: { service: process.env.SERVICE_NAME || 'design-frames-service' },
+});
+
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -444,7 +457,7 @@ async function handleRequest(req, res) {
   } catch (err) {
     if (err.code === 'BODY_TOO_LARGE') return sendJson(res, 413, { error: err.message });
     if (err.code) return sendJson(res, errorStatus(err), { error: err.message, details: err.details });
-    console.error('unhandled error:', err);
+    logger.error({ err }, 'unhandled error');
     return sendJson(res, 500, { error: 'internal server error' });
   }
 }
@@ -452,7 +465,7 @@ async function handleRequest(req, res) {
 function start() {
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((err) => {
-      console.error('handleRequest crashed:', err);
+      logger.error({ err }, 'handleRequest crashed');
       if (!res.headersSent) sendJson(res, 500, { error: 'internal server error' });
     });
   });
@@ -464,6 +477,9 @@ function start() {
         'WARNING: FUZEFRONT_API_URL is unset — writes cannot be verified and will all be REJECTED.'
       );
     }
+  });
+  process.once('SIGTERM', () => {
+    server.close(() => telemetry.shutdown().finally(() => process.exit(0)));
   });
   return server;
 }
