@@ -5,6 +5,7 @@
 
 import pino from 'pino';
 import { randomUUID } from 'node:crypto';
+import { withTraceContext } from '@izzywdev/fuzefront-telemetry';
 import type { NextFunction, Request, Response } from 'express';
 
 export const logger = pino({
@@ -47,10 +48,13 @@ export function requestLogger(req: LoggedRequest, res: Response, next: NextFunct
   const inbound = req.headers['x-request-id'];
   const reqId = (Array.isArray(inbound) ? inbound[0] : inbound) || randomUUID();
   req.reqId = reqId;
-  req.log = logger.child({ reqId, route: req.path, method: req.method });
-  req.log.info('request received');
+  // withTraceContext's logger generic doesn't unify with pino's Logger type; it only
+  // returns a child of the same logger, so narrow back to ReqLogger.
+  const log = withTraceContext(logger.child({ reqId, route: req.path, method: req.method }), req) as unknown as ReqLogger;
+  req.log = log;
+  log.info('request received');
   res.on('finish', () => {
-    req.log!.info({ status: res.statusCode }, 'request completed');
+    log.info({ status: res.statusCode }, 'request completed');
   });
   next();
 }

@@ -1,7 +1,7 @@
 {
   "name": "@fuzex/design-frames-service",
   "version": "0.1.0",
-  "description": "Standalone product-design-phase service: navigable HTML frames, per-flow approval, and a contract seam — served over REST, MCP, and A2A. Extracted from FuzeFront's design/frames/** pipeline.",
+  "description": "Standalone product-design-phase service: navigable HTML frames, per-flow approval, and a contract seam \u2014 served over REST, MCP, and A2A. Extracted from FuzeFront's design/frames/** pipeline.",
   "private": true,
   "main": "server.js",
   "scripts": {
@@ -11,7 +11,9 @@
     "test": "node --test tests/*.test.cjs"
   },
   "dependencies": {
-    "@izzywdev/fuzefront-service-auth": "^0.1.1"
+    "@izzywdev/fuzefront-service-auth": "^0.1.1",
+    "@izzywdev/fuzefront-telemetry": "^0.2.0",
+    "pino": "^9.5.0"
   },
   "engines": {
     "node": ">=24.0.0",

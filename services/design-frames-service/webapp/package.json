@@ -19,7 +19,8 @@
     "@xyflow/react": "^12.9.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "@izzywdev/fuzefront-design-system": "^1.0.0"
+    "@izzywdev/fuzefront-design-system": "^1.0.0",
+    "@izzywdev/fuzefront-telemetry": "^0.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

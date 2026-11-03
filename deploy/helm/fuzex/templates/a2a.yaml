@@ -1,0 +1,84 @@
+{{- if .Values.a2a.enabled }}
+# -- A2A pod: serves the design-review Agent Card to callers (FuzeFront).
+# Image: ghcr.io/izzywdev/fuze-a2a (shared; per-product variation is config only).
+# Scaffolded by a2a-maintainer. See values.yaml a2a: block for prerequisites.
+#
+# TODO(a2a-runtime-standard): verify config.json layout against
+#   fuzeagent/agent-templates/a2a/ before flipping enabled: true.
+#   governance/a2a-runtime-standard.md is NOT vendored in this repo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fuzex.fullname" . }}-a2a-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: a2a
+data:
+  config.json: |
+    {
+      "inClusterUrl": {{ .Values.a2a.inClusterUrl | quote }},
+      "auth": {
+        "oidcIssuerUrl": {{ .Values.a2a.auth.oidcIssuerUrl | quote }}
+      },
+      "tenants": {{ .Values.a2a.tenants | toJson }}
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fuzex.fullname" . }}-a2a
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: a2a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fuzex
+      app.kubernetes.io/component: a2a
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fuzex
+        app.kubernetes.io/component: a2a
+    spec:
+      containers:
+        - name: a2a
+          image: "{{ .Values.a2a.image.repository }}:{{ .Values.a2a.image.tag }}"
+          imagePullPolicy: {{ .Values.a2a.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.a2a.service.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            {{- toYaml .Values.a2a.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "fuzex.fullname" . }}-a2a-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fuzex.fullname" . }}-a2a
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fuzex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: a2a
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.a2a.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: fuzex
+    app.kubernetes.io/component: a2a
+{{- end }}

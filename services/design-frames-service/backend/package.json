@@ -1,7 +1,7 @@
 {
   "name": "@fuzex/design-frames-backend",
   "version": "0.1.0",
-  "description": "Isolated Express + pg + TypeScript lifecycle tier for design-frames-service (services/design-frames-service/docs/postgres-tier.md). SEPARATE from the vanilla ../server.js — additive, mountable/runnable alongside it, never a rewrite of it.",
+  "description": "Isolated Express + pg + TypeScript lifecycle tier for design-frames-service (services/design-frames-service/docs/postgres-tier.md). SEPARATE from the vanilla ../server.js \u2014 additive, mountable/runnable alongside it, never a rewrite of it.",
   "private": true,
   "license": "MIT",
   "main": "dist/index.js",
@@ -21,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.954.0",
     "@fuzex/identity": "file:../../../packages/identity",
     "@izzywdev/fuzefront-service-auth": "^0.1.1",
+    "@izzywdev/fuzefront-telemetry": "^0.2.0",
     "express": "^5.2.1",
     "kafkajs": "^2.2.4",
     "pg": "^8.23.0",

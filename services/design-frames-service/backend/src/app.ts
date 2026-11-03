@@ -5,6 +5,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { access, mkdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import type { ClientConfig, QueryConfig } from 'pg';
+import { tracingMiddleware } from '@izzywdev/fuzefront-telemetry';
 import { requestLogger } from './lib/logger';
 import { getPool } from './lib/db';
 import { DATA_DIR, getFrame } from './lib/fileStore';
@@ -22,6 +23,8 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+  // Before requestLogger: it reads req.traceId/spanId to stamp trace_id/span_id.
+  app.use(tracingMiddleware());
   app.use(requestLogger);
 
   // CORS — the Fuze family serves this API SAME-ORIGIN (FuzeFront's
